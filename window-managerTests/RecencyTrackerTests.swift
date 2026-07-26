@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import window_manager
+@testable import QuickSwitch
 
 @MainActor
 @Suite("Recency ordering")

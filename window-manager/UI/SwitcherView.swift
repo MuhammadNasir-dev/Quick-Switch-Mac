@@ -62,7 +62,7 @@ struct SwitcherView: View {
                 .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Window Switcher")
+        .accessibilityLabel("QuickSwitch")
     }
 
     private var separator: some View {
@@ -281,7 +281,7 @@ struct SwitcherView: View {
                 .foregroundStyle(.orange)
             Text("Accessibility access is required")
                 .font(.system(size: 13, weight: .semibold))
-            Text("Window Switcher cannot list or focus other apps' windows without it.")
+            Text("QuickSwitch cannot list or focus other apps' windows without it.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             Button("Open System Settings", action: onRequestPermissions)

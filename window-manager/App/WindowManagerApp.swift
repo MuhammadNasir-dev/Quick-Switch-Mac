@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let services = AppServices()
             self.services = services
 
-            let onboarding = UtilityWindowController(title: "Window Switcher Setup") {
+            let onboarding = UtilityWindowController(title: "QuickSwitch Setup") {
                 OnboardingView(
                     authorizer: services.authorizer,
                     preferences: services.preferences
@@ -60,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
             self.onboarding = onboarding
 
-            let settings = UtilityWindowController(title: "Window Switcher Settings") {
+            let settings = UtilityWindowController(title: "QuickSwitch Settings") {
                 SettingsView(
                     preferences: services.preferences,
                     authorizer: services.authorizer

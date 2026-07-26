@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 import Testing
-@testable import window_manager
+@testable import QuickSwitch
 
 @MainActor
 @Suite("Switcher view model")

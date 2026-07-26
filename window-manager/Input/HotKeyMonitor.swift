@@ -204,7 +204,7 @@ final class HotKeyMonitor {
                 CFRunLoopRunInMode(.defaultMode, 1.0, false)
             }
         }
-        thread.name = "com.window-manager.event-tap"
+        thread.name = "com.quickswitchmac.event-tap"
         thread.qualityOfService = .userInteractive
         thread.start()
         self.thread = thread

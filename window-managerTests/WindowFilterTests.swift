@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Testing
-@testable import window_manager
+@testable import QuickSwitch
 
 @Suite("Window filtering")
 struct WindowFilterTests {

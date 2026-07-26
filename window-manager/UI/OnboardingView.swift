@@ -13,6 +13,9 @@ struct OnboardingView: View {
     @ObservedObject var preferences: Preferences
     var onDone: () -> Void
 
+    /// Force-unwrap-free constant for a URL that is known-good at compile time.
+    static let website = URL(string: "https://quickswitchmac.com") ?? URL(fileURLWithPath: "/")
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
@@ -27,6 +30,8 @@ struct OnboardingView: View {
             shortcutSummary
 
             HStack {
+                Link("quickswitchmac.com", destination: Self.website)
+                    .font(.caption)
                 Spacer()
                 Button(authorizer.isTrusted ? "Done" : "Close", action: onDone)
                     .keyboardShortcut(.defaultAction)
@@ -42,7 +47,7 @@ struct OnboardingView: View {
                 .font(.system(size: 30))
                 .foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Window Switcher")
+                Text("QuickSwitch")
                     .font(.title2.weight(.semibold))
                 Text("Switch between every open window, not just apps.")
                     .font(.callout)
@@ -80,7 +85,7 @@ struct OnboardingView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 stepRow(1, "Open Privacy & Security → Accessibility.")
-                stepRow(2, "Enable Window Switcher in the list.")
+                stepRow(2, "Enable QuickSwitch in the list.")
                 stepRow(3, "Come back here — it detects the change automatically.")
             }
             .padding(.leading, 4)
@@ -100,7 +105,7 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Switch already on, but still not working?", systemImage: "wrench.and.screwdriver")
                         .font(.caption.weight(.semibold))
-                    Text("Select Window Switcher in the list, remove it with −, then drag the app back in with +. macOS only offers the permission prompt once per build, so an entry from a previous version cannot be re-approved — it has to be replaced.")
+                    Text("Select QuickSwitch in the list, remove it with −, then drag the app back in with +. macOS only offers the permission prompt once per build, so an entry from a previous version cannot be re-approved — it has to be replaced.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

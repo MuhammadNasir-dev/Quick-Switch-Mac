@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import window_manager
+@testable import QuickSwitch
 
 @Suite("Fuzzy matching")
 struct FuzzyMatcherTests {

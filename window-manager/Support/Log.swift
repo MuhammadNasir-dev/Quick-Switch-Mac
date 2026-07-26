@@ -8,7 +8,7 @@ import os
 /// windows are scanned. `Logger` is lock-free, level-filtered and free in
 /// release builds when the level is disabled.
 nonisolated enum Log {
-    private static let subsystem = Bundle.main.bundleIdentifier ?? "window-manager"
+    private static let subsystem = Bundle.main.bundleIdentifier ?? "com.quickswitchmac.QuickSwitch"
 
     static let windows = Logger(subsystem: subsystem, category: "windows")
     static let input = Logger(subsystem: subsystem, category: "input")

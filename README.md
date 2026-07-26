@@ -1,4 +1,6 @@
-# Window Switcher
+# QuickSwitch
+
+[quickswitchmac.com](https://quickswitchmac.com)
 
 A macOS window switcher that lists **every open window individually**, not just
 applications.
@@ -133,7 +135,7 @@ down, and the menu says why:
 
 macOS records an Accessibility decision **once per code signature** and then
 stops prompting, so an entry left over from an earlier build cannot be switched
-back on — the toggle appears to do nothing. Select Window Switcher in the list,
+back on — the toggle appears to do nothing. Select QuickSwitch in the list,
 remove it with **−**, then drag the app back in with **+**. The setup window has
 a *Reveal App* button for exactly this.
 
@@ -154,6 +156,14 @@ become permanent:
 * A 30-second idle watchdog dismisses the panel regardless.
 * Clicking outside always dismisses — mouse monitoring, unlike keyboard
   monitoring, does not require Accessibility trust.
+
+## Naming
+
+The product ships as **QuickSwitch.app** with bundle identifier
+`com.quickswitchmac.QuickSwitch`. The Xcode *target*, scheme and source folders
+are still named `window-manager` — internal identifiers that nothing
+user-visible depends on. Renaming those too is a mechanical follow-up if you
+want the repository to match the product.
 
 ## Known macOS limitations
 

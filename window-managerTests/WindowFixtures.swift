@@ -1,7 +1,7 @@
 import ApplicationServices
 import CoreGraphics
 import Foundation
-@testable import window_manager
+@testable import QuickSwitch
 
 /// Builders for `AppWindow` values in tests.
 ///

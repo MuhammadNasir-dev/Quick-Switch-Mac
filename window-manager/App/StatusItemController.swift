@@ -83,11 +83,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         var tooltip: String {
             switch self {
-            case .ready: "Window Switcher"
-            case .needsAccessibility: "Window Switcher — Accessibility access required"
-            case .inputFailed(.trustRevoked): "Window Switcher — Accessibility access was revoked"
-            case .inputFailed(.repeatedTimeouts): "Window Switcher — shortcut disabled by the system"
-            case .secureInput: "Window Switcher — secure input is active, shortcut paused"
+            case .ready: "QuickSwitch"
+            case .needsAccessibility: "QuickSwitch — Accessibility access required"
+            case .inputFailed(.trustRevoked): "QuickSwitch — Accessibility access was revoked"
+            case .inputFailed(.repeatedTimeouts): "QuickSwitch — shortcut disabled by the system"
+            case .secureInput: "QuickSwitch — secure input is active, shortcut paused"
             }
         }
     }
@@ -105,7 +105,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let health = self.health
         button.image = NSImage(
             systemSymbolName: health.symbolName,
-            accessibilityDescription: "Window Switcher"
+            accessibilityDescription: "QuickSwitch"
         )
         button.image?.isTemplate = true
         button.toolTip = health.tooltip
@@ -190,7 +190,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let quit = NSMenuItem(title: "Quit Window Switcher", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit QuickSwitch", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
 

@@ -3,7 +3,7 @@ import ApplicationServices
 import CoreGraphics
 import Foundation
 import Testing
-@testable import window_manager
+@testable import QuickSwitch
 
 @Suite("Panel geometry")
 struct SwitcherMetricsTests {

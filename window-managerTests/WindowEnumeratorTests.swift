@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import window_manager
+@testable import QuickSwitch
 
 /// Integration-flavoured checks against the live window server.
 ///
