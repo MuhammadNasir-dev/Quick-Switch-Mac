@@ -110,6 +110,10 @@ final class SwitcherViewModel: ObservableObject {
             preferences.$layout.map { _ in }.eraseToAnyPublisher()
         )
         .dropFirst(4) // the four replayed current values at subscription time
+        // `rebuildRows` reads these preferences back, and `@Published` emits
+        // from `willSet` — without the hop the rebuild would use the values
+        // that were just replaced.
+        .receive(on: RunLoop.main)
         .sink { [weak self] in
             self?.rebuildRows(preservingSelection: true)
         }

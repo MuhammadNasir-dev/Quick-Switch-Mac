@@ -115,6 +115,46 @@ preferences are covered by unit tests that need no window server. The
 enumerator tests run against the live system and assert invariants; they
 self-skip when Accessibility trust is absent.
 
+## If the shortcut stops working
+
+The menu-bar icon turns into a warning triangle whenever input interception is
+down, and the menu says why:
+
+* **Accessibility access was revoked** — re-grant it, then choose *Re-enable
+  Shortcut*.
+* **Shortcut disabled — the system kept dropping it** — macOS disabled the event
+  tap repeatedly. The app deliberately stops re-arming it rather than fighting
+  the system, because a tap that keeps timing out while installed makes the
+  keyboard unusable. *Re-enable Shortcut* retries on demand.
+* **Secure input is active** — another app has secure keyboard entry on; no
+  global shortcut can work until it releases.
+
+### Permission won't re-grant
+
+macOS records an Accessibility decision **once per code signature** and then
+stops prompting, so an entry left over from an earlier build cannot be switched
+back on — the toggle appears to do nothing. Select Window Switcher in the list,
+remove it with **−**, then drag the app back in with **+**. The setup window has
+a *Reveal App* button for exactly this.
+
+## Failing safe
+
+The panel sits above every other window and, while visible, the event tap
+swallows the keyboard. Several independent guards make sure that state cannot
+become permanent:
+
+* Trust is polled in **both** directions; revocation tears down the tap and the
+  panel within ~2 s even if the system notification never arrives.
+* When macOS disables the tap, the "switcher is visible" flag is cleared
+  *synchronously on the tap thread* before anything else — a disabled tap always
+  fails open, so keystrokes flow to the focused app.
+* Re-arming is rate-limited with exponential backoff and abandoned after four
+  consecutive timeouts. Re-enabling a tap that keeps timing out is what locks a
+  Mac's keyboard out; a broken switcher is strictly better.
+* A 30-second idle watchdog dismisses the panel regardless.
+* Clicking outside always dismisses — mouse monitoring, unlike keyboard
+  monitoring, does not require Accessibility trust.
+
 ## Known macOS limitations
 
 * **Accessibility access cannot be granted programmatically**, and it is

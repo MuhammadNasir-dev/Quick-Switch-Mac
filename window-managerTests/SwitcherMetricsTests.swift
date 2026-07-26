@@ -1,3 +1,5 @@
+import Combine
+import ApplicationServices
 import CoreGraphics
 import Foundation
 import Testing
@@ -225,5 +227,98 @@ struct PreferencesTests {
         #expect(Preferences(defaults: defaults).maximumVisibleRows == 16)
         defaults.set(1, forKey: "switcher.maximumVisibleRows")
         #expect(Preferences(defaults: defaults).maximumVisibleRows == 4)
+    }
+}
+
+@Suite("Event tap failure handling")
+struct HotKeyFailureTests {
+    @Test("Failure reasons are distinguishable")
+    func failureCases() {
+        #expect(HotKeyMonitor.Failure.trustRevoked != HotKeyMonitor.Failure.repeatedTimeouts)
+    }
+
+    @MainActor
+    @Test("Starting without Accessibility trust is refused, not attempted")
+    func startRequiresTrust() {
+        // The test host is not a trusted process, so this exercises the guard
+        // that keeps a useless tap out of the system input path.
+        guard !AXIsProcessTrusted() else { return }
+        let monitor = HotKeyMonitor(modifier: .option)
+        #expect(monitor.start() == false)
+        #expect(monitor.isRunning == false)
+    }
+
+    @MainActor
+    @Test("Stopping an unstarted monitor is safe and idempotent")
+    func stopIsIdempotent() {
+        let monitor = HotKeyMonitor(modifier: .option)
+        monitor.stop()
+        monitor.stop()
+        #expect(monitor.isRunning == false)
+    }
+
+    @MainActor
+    @Test("Visibility and hold-mode flags can always be cleared")
+    func flagsAlwaysClearable() {
+        // The lockout scenario: these flags decide whether the tap swallows
+        // every keystroke, so clearing them must never depend on the tap being
+        // healthy, or on any prior state.
+        let monitor = HotKeyMonitor(modifier: .option)
+        monitor.setSwitcherVisible(true)
+        monitor.setHoldModeActive(true)
+        monitor.setSwitcherVisible(false)
+        monitor.setHoldModeActive(false)
+        monitor.stop()
+        #expect(monitor.isRunning == false)
+    }
+}
+
+@MainActor
+@Suite("Published state settling")
+struct PublishedSettlingTests {
+    /// Reproduces the shape of the menu-bar icon bug: `@Published` fires from
+    /// `willSet`, so a subscriber that reads the property back sees the value
+    /// that is being *replaced*. Anything reading state back must therefore hop
+    /// a run-loop turn first.
+    @Test("A sink reading the property back sees the previous value")
+    func willSetDeliversStaleState() async {
+        final class Model: ObservableObject {
+            @Published var flag = false
+        }
+        let model = Model()
+        var observedByReadBack: [Bool] = []
+        var observedByValue: [Bool] = []
+
+        let token = model.$flag.dropFirst().sink { value in
+            observedByValue.append(value)
+            observedByReadBack.append(model.flag)
+        }
+        defer { token.cancel() }
+
+        model.flag = true
+
+        #expect(observedByValue == [true], "The emitted value is correct…")
+        #expect(observedByReadBack == [false], "…but reading the property back is not")
+    }
+
+    @Test("Deferring to the next run-loop turn observes the settled value")
+    func runLoopHopSeesSettledState() async throws {
+        final class Model: ObservableObject {
+            @Published var flag = false
+        }
+        let model = Model()
+        var observed: [Bool] = []
+
+        let token = model.$flag
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { _ in observed.append(model.flag) }
+        defer { token.cancel() }
+
+        model.flag = true
+        // Let the deferred delivery run.
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(observed == [true], "After the hop the property holds its new value")
     }
 }

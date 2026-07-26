@@ -19,11 +19,15 @@ import os
 /// instead of checking once at launch.
 ///
 /// macOS posts the distributed notification `com.apple.accessibility.api` when
-/// the trust database changes, but the notification is undocumented, coalesced,
-/// and not delivered to every process reliably. A slow timer is kept as a
-/// backstop and, importantly, **only runs while the state is unresolved or the
-/// app is untrusted** — once trusted, the app settles into pure notification
-/// observation and does no polling at all.
+/// the trust database changes, but it is undocumented, coalesced, and not
+/// delivered to every process reliably — so a timer polls as well, in **both**
+/// directions.
+///
+/// Detecting *revocation* is the safety-critical half. While trusted, this app
+/// holds a session-wide event tap and can put a borderless panel above every
+/// other window; if access is withdrawn and nothing notices, both are left in
+/// place with no way to dismiss them. `AXIsProcessTrusted()` is a cached lookup
+/// costing microseconds, so polling it steadily is free insurance.
 @MainActor
 final class AccessibilityAuthorizer: ObservableObject {
     enum Status: Equatable {
@@ -90,6 +94,7 @@ final class AccessibilityAuthorizer: ObservableObject {
     func requestTrust() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
+        hasRequestedTrust = true
         updateBackstopTimer()
     }
 
@@ -100,6 +105,26 @@ final class AccessibilityAuthorizer: ObservableObject {
             NSWorkspace.shared.open(url)
         }
     }
+
+    /// Reveals the app bundle in Finder so it can be dragged into the
+    /// Accessibility list.
+    ///
+    /// Needed because macOS shows the "grant access" prompt only **once per
+    /// code signature**. Once an entry exists — even a denied or stale one from
+    /// a previous build — `AXIsProcessTrustedWithOptions` stops prompting and
+    /// returns silently, which is why toggling the switch on can appear to do
+    /// nothing. Removing the entry with "−" and adding this bundle back is the
+    /// only reliable recovery, and it needs the bundle in hand.
+    func revealApplicationInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+    }
+
+    /// `true` when a prompt would be shown; `false` once macOS has recorded a
+    /// decision for this signature and will stay silent.
+    ///
+    /// There is no API for this, so it is inferred: the prompt only appears
+    /// while the process is untrusted *and* has never asked.
+    private(set) var hasRequestedTrust = false
 
     // MARK: - Private
 
@@ -114,12 +139,23 @@ final class AccessibilityAuthorizer: ObservableObject {
         refresh()
     }
 
-    /// Runs a 1.5 s backstop poll only while untrusted; stops once granted.
+    /// Polls the trust database in **both** directions.
+    ///
+    /// An earlier version only polled while untrusted, on the theory that once
+    /// granted the distributed notification would report any revocation. It does
+    /// not do so reliably, and the consequence was severe: revoking access left
+    /// the event tap installed and the panel on screen with nothing able to tear
+    /// them down, so the switcher sat there swallowing the keyboard.
+    ///
+    /// Detecting revocation is a safety requirement, not an optimisation.
+    /// `AXIsProcessTrusted()` is a cached lookup costing microseconds, so a
+    /// steady 2-second check while trusted is free; while untrusted the
+    /// interval tightens because the user is actively in System Settings
+    /// waiting for the app to notice.
     private func updateBackstopTimer() {
         backstopTimer?.invalidate()
-        backstopTimer = nil
-        guard status == .notTrusted else { return }
-        let timer = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
+        let interval: TimeInterval = status == .trusted ? 2.0 : 1.0
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
         RunLoop.main.add(timer, forMode: .common)

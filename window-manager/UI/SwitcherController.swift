@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import os
 
 /// Orchestrates the switcher: turns `SwitcherCommand`s into view-model updates
 /// and panel visibility, and hands the final choice to `WindowActivator`.
@@ -22,6 +23,20 @@ final class SwitcherController {
     private var hostingView: NSHostingView<SwitcherView>?
     private var cancellables = Set<AnyCancellable>()
     private var localMouseMonitor: Any?
+    private var watchdogTimer: Timer?
+
+    /// A visible panel with no interaction for this long is dismissed.
+    ///
+    /// The panel is borderless, non-activating and sits at `.screenSaver` level
+    /// — above everything, including full-screen apps — and while it is up the
+    /// event tap swallows the keyboard. If anything goes wrong badly enough that
+    /// neither Escape nor an outside click gets through (the tap being disabled
+    /// mid-session, Accessibility trust vanishing, the main thread stalling),
+    /// the user is left staring at an overlay they cannot remove.
+    ///
+    /// A dead-man's switch costs nothing and makes that state impossible. No
+    /// real interaction pauses for thirty seconds mid-switch.
+    private static let watchdogInterval: TimeInterval = 30
 
     /// `true` between `show()` and `dismiss()`.
     private(set) var isVisible = false
@@ -56,6 +71,7 @@ final class SwitcherController {
         if let localMouseMonitor {
             NSEvent.removeMonitor(localMouseMonitor)
         }
+        watchdogTimer?.invalidate()
     }
 
     // MARK: - Setup
@@ -97,24 +113,30 @@ final class SwitcherController {
 
     private func observeState() {
         // Keep the panel height in step with the number of matches.
-        viewModel.$rows
-            .map { rows in [rows.count, rows.count { $0.startsGroup }] }
-            .removeDuplicates()
-            .sink { [weak self] _ in
-                guard let self, self.isVisible else { return }
-                self.panel.updateSize(self.currentPanelSize())
-            }
-            .store(in: &cancellables)
-
-        // Switching layout changes both dimensions of the panel.
-        preferences.$layout
-            .removeDuplicates()
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard let self, self.isVisible else { return }
-                self.panel.updateSize(self.currentPanelSize())
-            }
-            .store(in: &cancellables)
+        // Both of these recompute the panel size, which reads the row count,
+        // group count and layout back out of their objects. `@Published` emits
+        // from `willSet`, so at delivery time those properties still hold their
+        // *previous* values — sizing here directly would lay the panel out one
+        // update behind, leaving a gap or a clipped row after every filter
+        // keystroke and after every ⌘L. The run-loop hop lets them settle.
+        Publishers.Merge(
+            viewModel.$rows
+                .map { rows in [rows.count, rows.count { $0.startsGroup }] }
+                .removeDuplicates()
+                .map { _ in }
+                .eraseToAnyPublisher(),
+            preferences.$layout
+                .removeDuplicates()
+                .dropFirst()
+                .map { _ in }
+                .eraseToAnyPublisher()
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] in
+            guard let self, self.isVisible else { return }
+            self.panel.updateSize(self.currentPanelSize())
+        }
+        .store(in: &cancellables)
 
         // A pinned panel no longer confirms on modifier release.
         viewModel.$isPinned
@@ -155,6 +177,9 @@ final class SwitcherController {
     // MARK: - Commands
 
     func handle(_ command: SwitcherCommand) {
+        // Any input proves the panel is still under the user's control.
+        restartWatchdog()
+
         switch command {
         case .invoke(let reverse):
             if isVisible {
@@ -258,18 +283,41 @@ final class SwitcherController {
         isVisible = true
         hotKeyMonitor.setSwitcherVisible(true)
         hotKeyMonitor.setHoldModeActive(preferences.confirmOnModifierRelease)
+        restartWatchdog()
 
         windowIndex.scheduleRefresh()
     }
 
+    /// Closes the panel and releases the keyboard.
+    ///
+    /// Safe and idempotent from any state — the visibility guard covers the
+    /// bookkeeping, but the tap flag and the panel are cleared unconditionally
+    /// so a desynchronised state can always be recovered from.
     func dismiss() {
-        guard isVisible else { return }
-        isVisible = false
+        watchdogTimer?.invalidate()
+        watchdogTimer = nil
         hotKeyMonitor.setSwitcherVisible(false)
         hotKeyMonitor.setHoldModeActive(false)
         panel.orderOut(nil)
         panel.endSession()
+
+        guard isVisible else { return }
+        isVisible = false
         viewModel.endSession()
+    }
+
+    private func restartWatchdog() {
+        watchdogTimer?.invalidate()
+        guard isVisible else { return }
+        let timer = Timer(timeInterval: Self.watchdogInterval, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isVisible else { return }
+                Log.ui.notice("Switcher idle watchdog fired; dismissing")
+                self.dismiss()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        watchdogTimer = timer
     }
 
     private func confirm() {

@@ -29,8 +29,22 @@ import os
 /// main thread.
 @MainActor
 final class HotKeyMonitor {
+    /// Why the tap gave up.
+    enum Failure: Equatable {
+        /// Accessibility trust was revoked while the tap was installed.
+        case trustRevoked
+        /// macOS disabled the tap for slowness repeatedly; re-arming it would
+        /// risk locking the user's keyboard out.
+        case repeatedTimeouts
+    }
+
     /// Called on the main actor for each decoded command.
     var onCommand: ((SwitcherCommand) -> Void)?
+    /// Fires whenever the system disables the tap, so any visible UI that
+    /// depends on owning the keyboard can be torn down immediately.
+    var onTapDisabled: (() -> Void)?
+    /// Fires when the tap has been abandoned and will not be retried.
+    var onTapFailed: ((Failure) -> Void)?
     /// Reports whether the tap is currently installed and enabled.
     @Published private(set) var isRunning = false
 
@@ -43,6 +57,8 @@ final class HotKeyMonitor {
     private var threadRunLoop: CFRunLoop?
     private var threadContext: TapThreadContext?
     private var healthTimer: Timer?
+    private var consecutiveDisables = 0
+    private var lastDisableTime = Date.distantPast
 
     /// Weak self-reference handed to the C callback.
     ///
@@ -118,6 +134,8 @@ final class HotKeyMonitor {
         }
 
         self.tap = tap
+        consecutiveDisables = 0
+        lastDisableTime = .distantPast
         state.setTap(tap)
         startTapThread(with: tap)
         startHealthTimer()
@@ -198,27 +216,98 @@ final class HotKeyMonitor {
         threadRunLoop = context.runLoop
     }
 
-    /// Re-enables the tap if macOS disabled it.
+    /// Recovers a tap that macOS disabled, with strict limits.
     ///
-    /// `.tapDisabledByTimeout` is also delivered as an event and handled inline,
-    /// but a tap can additionally be dropped when the trust database changes,
-    /// which produces no event at all.
+    /// A tap can also be dropped when the trust database changes, which
+    /// produces no event at all — hence the periodic check as well as the
+    /// event-driven path.
     private func startHealthTimer() {
         healthTimer?.invalidate()
         let timer = Timer(timeInterval: 3.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let tap = self.tap, self.isRunning else { return }
-                if self.state.consumeReenableRequest() {
-                    Log.input.notice("Event tap reported disabled by the system")
+
+                // Trust can be revoked at any moment. Without it the tap is
+                // useless, and re-arming it forever would be pure churn.
+                guard AXIsProcessTrusted() else {
+                    Log.input.notice("Accessibility trust lost; stopping the event tap")
+                    self.stop()
+                    self.onTapFailed?(.trustRevoked)
+                    return
                 }
-                if !CGEvent.tapIsEnabled(tap: tap) {
-                    Log.input.notice("Event tap was disabled; re-enabling")
-                    CGEvent.tapEnable(tap: tap, enable: true)
+
+                guard !CGEvent.tapIsEnabled(tap: tap) else {
+                    // Healthy for a while: forgive historical timeouts so a
+                    // rare hiccup never accumulates into a permanent give-up.
+                    if Date().timeIntervalSince(self.lastDisableTime) > Self.disableForgivenessInterval {
+                        self.consecutiveDisables = 0
+                    }
+                    return
                 }
+
+                self.attemptReenable(reason: "periodic check")
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         healthTimer = timer
+    }
+
+    /// How many disables in quick succession before the tap is abandoned.
+    private static let maximumConsecutiveDisables = 4
+    /// A tap healthy for this long has its disable count reset.
+    private static let disableForgivenessInterval: TimeInterval = 30
+
+    /// Responds to the system disabling the tap.
+    ///
+    /// The dangerous case is `.tapDisabledByTimeout` in a loop: macOS disables a
+    /// tap whose callback is too slow, and if the app immediately re-arms it the
+    /// system routes all keyboard input back through a tap that still cannot
+    /// service it. Repeated blindly — which the previous implementation did,
+    /// from both the callback and a timer — that locks the keyboard out
+    /// system-wide with no way for the user to break the cycle.
+    ///
+    /// So: dismiss the panel, back off, and after a handful of failures stop
+    /// entirely and report it. A switcher that has stopped working is a bug; a
+    /// Mac that has stopped accepting input is an emergency.
+    fileprivate func handleTapDisabled(timedOut: Bool) {
+        guard isRunning else { return }
+        _ = state.consumeReenableRequest()
+
+        // The panel must not be left on screen owning nothing.
+        onTapDisabled?()
+
+        guard timedOut else {
+            // `.tapDisabledByUserInput` is a transient security transition, not
+            // a fault of ours; restore without counting it against the budget.
+            attemptReenable(reason: "user-input transition")
+            return
+        }
+
+        consecutiveDisables += 1
+        lastDisableTime = Date()
+
+        guard consecutiveDisables <= Self.maximumConsecutiveDisables else {
+            Log.input.error("Event tap timed out repeatedly; abandoning it to keep the keyboard usable")
+            stop()
+            onTapFailed?(.repeatedTimeouts)
+            return
+        }
+
+        // Exponential backoff gives a busy main thread room to recover instead
+        // of being handed the entire keystroke stream again immediately.
+        let delay = pow(2.0, Double(consecutiveDisables - 1)) * 0.25
+        Log.input.notice("Event tap timed out (\(self.consecutiveDisables, privacy: .public)); retrying in \(delay, privacy: .public)s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.attemptReenable(reason: "timeout backoff")
+        }
+    }
+
+    private func attemptReenable(reason: String) {
+        guard isRunning, let tap, AXIsProcessTrusted() else { return }
+        guard !CGEvent.tapIsEnabled(tap: tap) else { return }
+        Log.input.notice("Re-enabling event tap (\(reason, privacy: .public))")
+        CGEvent.tapEnable(tap: tap, enable: true)
     }
 
     // MARK: - Tap callback
@@ -228,10 +317,17 @@ final class HotKeyMonitor {
         guard let refcon else { return Unmanaged.passUnretained(event) }
         let monitor = Unmanaged<HotKeyMonitor>.fromOpaque(refcon).takeUnretainedValue()
 
-        // macOS disables taps whose callback is too slow, or on user input
-        // during certain security transitions. Re-enable immediately.
+        // macOS disables taps whose callback is too slow, and on certain
+        // security transitions. Release the keyboard synchronously, then let
+        // the main actor decide whether re-arming is safe.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            monitor.state.requestReenable()
+            monitor.state.noteDisabled()
+            let timedOut = type == .tapDisabledByTimeout
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    monitor.handleTapDisabled(timedOut: timedOut)
+                }
+            }
             return Unmanaged.passUnretained(event)
         }
 
@@ -339,24 +435,33 @@ private nonisolated final class TapState: @unchecked Sendable {
         os_unfair_lock_unlock(&lock)
     }
 
-    /// Records the port so the callback can revive the tap without a main-actor
-    /// hop — the whole point being that the main thread may be the reason the
-    /// tap timed out in the first place.
     func setTap(_ port: CFMachPort?) {
         os_unfair_lock_lock(&lock)
         tapPort = port
         os_unfair_lock_unlock(&lock)
     }
 
-    /// Re-enables the tap immediately, from the tap thread.
-    func requestReenable() {
+    /// Handles the system disabling the tap, from the tap thread.
+    ///
+    /// **Releases the keyboard first.** While `isSwitcherVisible` is true the
+    /// decision table swallows every key, including Escape. If the tap is
+    /// re-armed while that flag is still set — and the panel is stuck because
+    /// the main thread is wedged — the user has no keyboard at all and no way
+    /// to dismiss anything. Clearing the flag here guarantees that a disabled
+    /// tap always fails *open*.
+    ///
+    /// Re-enabling is deliberately **not** done here. The old code re-armed the
+    /// tap immediately from this callback and again from a 3-second timer, so a
+    /// tap that kept timing out was instantly put back in the input path,
+    /// wedging keyboard input system-wide in a loop the user could not break.
+    /// The decision now belongs to `HotKeyMonitor`, which applies backoff and
+    /// gives up rather than fighting the system.
+    func noteDisabled() {
         os_unfair_lock_lock(&lock)
+        isSwitcherVisible = false
+        isHoldModeActive = false
         reenableRequested = true
-        let port = tapPort
         os_unfair_lock_unlock(&lock)
-        if let port {
-            CGEvent.tapEnable(tap: port, enable: true)
-        }
     }
 
     /// Decodes an event. Returns `nil` to pass the event through untouched.

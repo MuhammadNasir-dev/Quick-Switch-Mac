@@ -89,6 +89,24 @@ struct OnboardingView: View {
                 Button("Open System Settings") { authorizer.openSystemSettings() }
                     .buttonStyle(.borderedProminent)
                 Button("Request Access") { authorizer.requestTrust() }
+                Button("Reveal App") { authorizer.revealApplicationInFinder() }
+            }
+
+            // The single most common way to get stuck, and completely opaque
+            // without an explanation: macOS records a decision per code
+            // signature and then stops prompting, so an entry left over from an
+            // earlier build can never be switched back on.
+            GroupBox {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Switch already on, but still not working?", systemImage: "wrench.and.screwdriver")
+                        .font(.caption.weight(.semibold))
+                    Text("Select Window Switcher in the list, remove it with −, then drag the app back in with +. macOS only offers the permission prompt once per build, so an entry from a previous version cannot be re-approved — it has to be replaced.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
             }
         }
     }

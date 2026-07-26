@@ -11,12 +11,13 @@ import os
 /// otherwise look like the app is broken — missing Accessibility trust, and
 /// secure keyboard entry suppressing the hotkey.
 @MainActor
-final class StatusItemController {
+final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let services: AppServices
     private let onOpenSettings: () -> Void
     private let onOpenOnboarding: () -> Void
     private var cancellables = Set<AnyCancellable>()
+    private weak var windowCountItem: NSMenuItem?
 
     init(
         services: AppServices,
@@ -27,40 +28,100 @@ final class StatusItemController {
         self.onOpenSettings = onOpenSettings
         self.onOpenOnboarding = onOpenOnboarding
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        super.init()
 
+        refresh()
+        observeState()
+    }
+
+    private func observeState() {
+        Publishers.MergeMany(
+            services.authorizer.$status.map { _ in }.eraseToAnyPublisher(),
+            services.authorizer.$isSecureInputActive.map { _ in }.eraseToAnyPublisher(),
+            services.$inputFailure.map { _ in }.eraseToAnyPublisher(),
+            services.preferences.$layout.map { _ in }.eraseToAnyPublisher()
+        )
+        // `@Published` publishes from `willSet`, so at delivery time the
+        // properties still hold their *previous* values. `refresh()` reads the
+        // current state back out of the services, and reading it one
+        // notification too early is exactly why the icon stayed on the warning
+        // triangle after access was granted: the last emission was handled
+        // while `status` was still `.notTrusted`, and nothing emitted again.
+        //
+        // Hopping to the next run-loop turn lets every transition settle first,
+        // and coalesces the burst of changes that a grant produces — status,
+        // then the input failure being cleared — into a single rebuild.
+        //
+        // The window index is deliberately *not* a trigger: it changes
+        // constantly, and the only thing that depends on it is the count, which
+        // `menuWillOpen` freshens at the moment it becomes visible.
+        .receive(on: RunLoop.main)
+        .sink { [weak self] in self?.refresh() }
+        .store(in: &cancellables)
+    }
+
+    /// Re-reads every input and rebuilds the icon and menu from scratch.
+    private func refresh() {
         configureButton()
         rebuildMenu()
+    }
 
-        Publishers.CombineLatest(services.authorizer.$status, services.authorizer.$isSecureInputActive)
-            .sink { [weak self] _, _ in
-                self?.configureButton()
-                self?.rebuildMenu()
+    /// Overall health, driving both the icon and the warning row in the menu.
+    private enum Health {
+        case ready
+        case needsAccessibility
+        case inputFailed(HotKeyMonitor.Failure)
+        case secureInput
+
+        var symbolName: String {
+            switch self {
+            case .ready: "macwindow.on.rectangle"
+            case .needsAccessibility, .inputFailed: "exclamationmark.triangle"
+            case .secureInput: "keyboard.badge.ellipsis"
             }
-            .store(in: &cancellables)
+        }
 
-        services.preferences.$layout
-            .dropFirst()
-            .sink { [weak self] _ in self?.rebuildMenu() }
-            .store(in: &cancellables)
+        var tooltip: String {
+            switch self {
+            case .ready: "Window Switcher"
+            case .needsAccessibility: "Window Switcher — Accessibility access required"
+            case .inputFailed(.trustRevoked): "Window Switcher — Accessibility access was revoked"
+            case .inputFailed(.repeatedTimeouts): "Window Switcher — shortcut disabled by the system"
+            case .secureInput: "Window Switcher — secure input is active, shortcut paused"
+            }
+        }
+    }
+
+    /// Ordered by severity: what stops the app working outright comes first.
+    private var health: Health {
+        guard services.authorizer.isTrusted else { return .needsAccessibility }
+        if let failure = services.inputFailure { return .inputFailed(failure) }
+        if services.authorizer.isSecureInputActive { return .secureInput }
+        return .ready
     }
 
     private func configureButton() {
         guard let button = statusItem.button else { return }
-        let trusted = services.authorizer.isTrusted
-        let symbol = trusted ? "macwindow.on.rectangle" : "exclamationmark.triangle"
+        let health = self.health
         button.image = NSImage(
-            systemSymbolName: symbol,
+            systemSymbolName: health.symbolName,
             accessibilityDescription: "Window Switcher"
         )
         button.image?.isTemplate = true
-        button.toolTip = trusted ? "Window Switcher" : "Window Switcher — Accessibility access required"
+        button.toolTip = health.tooltip
     }
 
     private func rebuildMenu() {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        if !services.authorizer.isTrusted {
+        // Derived from the same `Health` the icon uses, so the two can never
+        // disagree about whether anything is wrong.
+        switch health {
+        case .ready:
+            break
+
+        case .needsAccessibility:
             let warning = NSMenuItem(
                 title: "Accessibility access required",
                 action: #selector(openOnboarding),
@@ -69,9 +130,24 @@ final class StatusItemController {
             warning.target = self
             menu.addItem(warning)
             menu.addItem(.separator())
-        } else if services.authorizer.isSecureInputActive {
+
+        case .inputFailed(let failure):
+            let title = switch failure {
+            case .trustRevoked: "Accessibility access was revoked"
+            case .repeatedTimeouts: "Shortcut disabled — the system kept dropping it"
+            }
+            let warning = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            warning.isEnabled = false
+            menu.addItem(warning)
+
+            let retry = NSMenuItem(title: "Re-enable Shortcut", action: #selector(retryInput), keyEquivalent: "")
+            retry.target = self
+            menu.addItem(retry)
+            menu.addItem(.separator())
+
+        case .secureInput:
             let warning = NSMenuItem(
-                title: "Secure input is active — hotkey paused",
+                title: "Secure input is active — shortcut paused",
                 action: nil,
                 keyEquivalent: ""
             )
@@ -85,13 +161,10 @@ final class StatusItemController {
         show.isEnabled = services.authorizer.isTrusted
         menu.addItem(show)
 
-        let count = NSMenuItem(
-            title: "\(services.windowIndex.windows.count) windows tracked",
-            action: nil,
-            keyEquivalent: ""
-        )
+        let count = NSMenuItem(title: windowCountTitle, action: nil, keyEquivalent: "")
         count.isEnabled = false
         menu.addItem(count)
+        windowCountItem = count
 
         menu.addItem(.separator())
 
@@ -121,10 +194,23 @@ final class StatusItemController {
         quit.target = self
         menu.addItem(quit)
 
-        // Refresh the window count each time the menu opens rather than
-        // subscribing to every index update.
-        menu.delegate = MenuRefresher.shared
+        menu.delegate = self
         statusItem.menu = menu
+    }
+
+    /// Freshens the live window count at the moment the menu is shown, which is
+    /// cheaper and more accurate than rebuilding on every index update.
+    func menuWillOpen(_ menu: NSMenu) {
+        windowCountItem?.title = windowCountTitle
+    }
+
+    private var windowCountTitle: String {
+        let count = services.windowIndex.windows.count
+        return count == 1 ? "1 window tracked" : "\(count) windows tracked"
+    }
+
+    @objc private func retryInput() {
+        services.restartInput()
     }
 
     @objc private func showSwitcher() {
@@ -149,10 +235,4 @@ final class StatusItemController {
     @objc private func quit() {
         NSApp.terminate(nil)
     }
-}
-
-/// Shared no-op delegate placeholder; the menu is rebuilt on state changes, so
-/// nothing dynamic is needed per-open beyond what AppKit already does.
-private final class MenuRefresher: NSObject, NSMenuDelegate {
-    @MainActor static let shared = MenuRefresher()
 }
