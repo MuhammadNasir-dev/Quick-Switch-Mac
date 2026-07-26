@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import ApplicationServices
 import CoreGraphics
@@ -320,5 +321,190 @@ struct PublishedSettlingTests {
         try await Task.sleep(for: .milliseconds(50))
 
         #expect(observed == [true], "After the hop the property holds its new value")
+    }
+}
+
+@MainActor
+@Suite("Launch at login")
+struct LaunchAtLoginTests {
+    @Test("State reflects the system, with no local mirror to drift")
+    func stateComesFromTheSystem() {
+        // Constructing the service reads `SMAppService` directly. The test host
+        // is not a registered login item, so any state except `.enabled` is
+        // valid here — what matters is that it resolves without trapping.
+        let service = LaunchAtLoginService()
+        #expect(service.state != .enabled || service.isEnabled)
+    }
+
+    @Test("Refreshing is idempotent")
+    func refreshIsIdempotent() {
+        let service = LaunchAtLoginService()
+        let first = service.state
+        service.refresh()
+        #expect(service.state == first)
+    }
+
+    @Test("Approval and unavailable states both read as 'on' or explained")
+    func stateSemantics() {
+        #expect(LaunchAtLoginService.State.enabled.isOn)
+        #expect(LaunchAtLoginService.State.requiresApproval.isOn,
+                "Registered-but-unapproved must show the switch as on")
+        #expect(!LaunchAtLoginService.State.disabled.isOn)
+        #expect(!LaunchAtLoginService.State.unavailable(reason: "x").isOn)
+    }
+
+    @Test("Only actionable states carry an explanation")
+    func explanations() {
+        let service = LaunchAtLoginService()
+        // A service in a plain enabled/disabled state needs no help text.
+        if service.state == .enabled || service.state == .disabled {
+            #expect(service.explanation == nil)
+        } else {
+            #expect(service.explanation != nil, "Non-obvious states must explain themselves")
+        }
+    }
+}
+
+@MainActor
+@Suite("Bundle metadata and icon geometry")
+struct AppInfoTests {
+    @Test("Version strings come from the bundle, never hard-coded")
+    func versionFromBundle() {
+        // The test bundle carries its own Info.plist, so this asserts the
+        // plumbing resolves rather than any particular value.
+        #expect(!AppInfo.version.isEmpty)
+        #expect(!AppInfo.build.isEmpty)
+        #expect(!AppInfo.name.isEmpty)
+        #expect(!AppInfo.copyright.isEmpty)
+    }
+
+    @Test("Display version collapses a redundant build number")
+    func displayVersionFormatting() {
+        // `1.0 (1)` when they differ, plain `1.0` when they are the same.
+        let combined = AppInfo.displayVersion
+        if AppInfo.build == AppInfo.version {
+            #expect(combined == AppInfo.version)
+        } else {
+            #expect(combined == "\(AppInfo.version) (\(AppInfo.build))")
+        }
+    }
+
+    @Test("The website URL is well-formed without force-unwrapping")
+    func websiteURL() {
+        #expect(AppInfo.website.host() == "quickswitchmac.com")
+        #expect(AppInfo.website.scheme == "https")
+    }
+
+    @Test("Menu-bar icon heights stay on whole pixels at 1x")
+    func statusIconAvoidsHalfPixels() {
+        // The blur on non-Retina displays came from SF Symbols' default 15pt
+        // height inside a 22pt bar: (22 - 15) / 2 = 3.5pt, half a pixel at 1x.
+        // An even height keeps the centring inset integral at every scale.
+        let thickness = NSStatusBar.system.thickness
+        let height = StatusItemController.roundedToEven(min(18, thickness - 4))
+
+        #expect(height.truncatingRemainder(dividingBy: 2) == 0, "Height must be even")
+        let inset = (thickness - height) / 2
+        #expect(inset == inset.rounded(), "Centring inset must land on a whole point")
+        #expect(height <= thickness - 2, "Icon must not fill the bar edge to edge")
+    }
+
+    @Test("Even-rounding never yields a zero or odd size")
+    func evenRounding() {
+        for raw in stride(from: 0.0, through: 40.0, by: 0.5) {
+            let value = StatusItemController.roundedToEven(CGFloat(raw))
+            #expect(value >= 2)
+            #expect(value.truncatingRemainder(dividingBy: 2) == 0)
+        }
+    }
+}
+
+@MainActor
+@Suite("Menu header rendering")
+struct MenuHeaderViewTests {
+    private func render(width: CGFloat = MenuHeaderView.preferredWidth) -> (NSBitmapImageRep, MenuHeaderView)? {
+        let view = MenuHeaderView(onOpenSettings: {})
+        view.frame = NSRect(x: 0, y: 0, width: width, height: MenuHeaderView.preferredHeight)
+        view.update(subtitle: "Ready", isWarning: false)
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        return (rep, view)
+    }
+
+    /// Counts pixels with meaningful alpha inside a rect, in view coordinates.
+    private func coverage(_ rep: NSBitmapImageRep, in rect: NSRect, viewHeight: CGFloat) -> Double {
+        let scaleX = Double(rep.pixelsWide) / Double(rep.size.width)
+        let scaleY = Double(rep.pixelsHigh) / Double(rep.size.height)
+        var opaque = 0
+        var total = 0
+        for x in Int(rect.minX * scaleX)..<Int(rect.maxX * scaleX) {
+            for y in Int(rect.minY * scaleY)..<Int(rect.maxY * scaleY) {
+                // Bitmap rows run top-down; view coordinates run bottom-up.
+                let flipped = Int(viewHeight * scaleY) - 1 - y
+                guard x >= 0, x < rep.pixelsWide, flipped >= 0, flipped < rep.pixelsHigh else { continue }
+                total += 1
+                if let colour = rep.colorAt(x: x, y: flipped), colour.alphaComponent > 0.05 {
+                    opaque += 1
+                }
+            }
+        }
+        return total == 0 ? 0 : Double(opaque) / Double(total)
+    }
+
+    @Test("The settings gear draws visible pixels")
+    func gearIsVisible() throws {
+        // Regression: the gear was an NSButton with an `.accessoryBarAction`
+        // bezel, which inside a vibrant menu painted an accent-coloured fill
+        // over the template glyph — the icon was invisible until pressed.
+        let (rep, view) = try #require(render())
+        let trailing = NSRect(
+            x: view.bounds.width - 44,
+            y: 0,
+            width: 44,
+            height: view.bounds.height
+        )
+        let filled = coverage(rep, in: trailing, viewHeight: view.bounds.height)
+        #expect(filled > 0.01, "The gear must render something; coverage was \(filled)")
+        #expect(filled < 0.85, "A glyph, not a filled block; coverage was \(filled)")
+    }
+
+    @Test("The gear is anchored to the trailing edge at any width")
+    func gearFollowsWidth() {
+        // Asserted arithmetically rather than by sampling pixels: the header
+        // also draws text, and a pixel probe would be measuring font metrics
+        // as much as layout.
+        let height = MenuHeaderView.preferredHeight
+        for width in [MenuHeaderView.preferredWidth, 320, 380, 460] as [CGFloat] {
+            let rect = MenuHeaderView.gearRect(in: NSSize(width: width, height: height))
+            let trailingGap = width - rect.maxX
+            #expect(trailingGap == 14, "Gear must keep a constant trailing inset at width \(width)")
+            #expect(rect.midY == height / 2, "Gear must stay vertically centred")
+            #expect(rect.minX > 0)
+        }
+    }
+
+    @Test("A wider menu moves the gear rather than stranding it")
+    func gearIsNotStranded() {
+        let height = MenuHeaderView.preferredHeight
+        let narrow = MenuHeaderView.gearRect(in: NSSize(width: 268, height: height))
+        let wide = MenuHeaderView.gearRect(in: NSSize(width: 380, height: height))
+        #expect(wide.minX - narrow.minX == 112, "Gear must shift by the full width increase")
+    }
+
+    @Test("The gear exposes itself as a button to assistive technology")
+    func gearIsAccessible() {
+        let view = MenuHeaderView(onOpenSettings: {})
+        #expect(view.isAccessibilityElement())
+        #expect(view.accessibilityRole() == .button)
+        #expect(view.accessibilityLabel() == "Settings")
+    }
+
+    @Test("Pressing through accessibility invokes the callback")
+    func accessibilityPressWorks() {
+        var opened = false
+        let view = MenuHeaderView(onOpenSettings: { opened = true })
+        #expect(view.accessibilityPerformPress())
+        #expect(opened)
     }
 }

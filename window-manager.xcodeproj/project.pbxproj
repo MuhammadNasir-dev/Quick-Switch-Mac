@@ -24,7 +24,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		9388036C2FE8306900D165A6 /* window-manager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "window-manager.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		9388036C2FE8306900D165A6 /* QuickSwitch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuickSwitch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		938803792FE8306D00D165A6 /* window-managerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "window-managerTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		938803832FE8306D00D165A6 /* window-managerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "window-managerUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -85,7 +85,7 @@
 		9388036D2FE8306900D165A6 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				9388036C2FE8306900D165A6 /* window-manager.app */,
+				9388036C2FE8306900D165A6 /* QuickSwitch.app */,
 				938803792FE8306D00D165A6 /* window-managerTests.xctest */,
 				938803832FE8306D00D165A6 /* window-managerUITests.xctest */,
 			);
@@ -114,7 +114,7 @@
 			packageProductDependencies = (
 			);
 			productName = "window-manager";
-			productReference = 9388036C2FE8306900D165A6 /* window-manager.app */;
+			productReference = 9388036C2FE8306900D165A6 /* QuickSwitch.app */;
 			productType = "com.apple.product-type.application";
 		};
 		938803782FE8306D00D165A6 /* window-managerTests */ = {
@@ -192,6 +192,7 @@
 			knownRegions = (
 				en,
 				Base,
+				"en-GB",
 			);
 			mainGroup = 938803632FE8306900D165A6;
 			minimizedProjectReferenceProxies = 1;
@@ -394,6 +395,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -403,15 +405,17 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Quick Switch";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAccessibilityUsageDescription = "Window Switcher needs Accessibility access to list and focus the windows of other applications.";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "quickswitchmac.com";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 QuickSwitch. All rights reserved.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.quickswitchmac.QuickSwitch";
+				PRODUCT_BUNDLE_IDENTIFIER = com.devsock.quickswitch;
 				PRODUCT_NAME = QuickSwitch;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -428,6 +432,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -437,15 +442,17 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Quick Switch";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAccessibilityUsageDescription = "Window Switcher needs Accessibility access to list and focus the windows of other applications.";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "quickswitchmac.com";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 QuickSwitch. All rights reserved.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.quickswitchmac.QuickSwitch";
+				PRODUCT_BUNDLE_IDENTIFIER = com.devsock.quickswitch;
 				PRODUCT_NAME = QuickSwitch;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -467,7 +474,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.7;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.quickswitchmac.QuickSwitchTests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.devsock.quickswitchTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -488,7 +495,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.7;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.quickswitchmac.QuickSwitchTests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.devsock.quickswitchTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -502,12 +509,13 @@
 		938803942FE8306D00D165A6 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = X3A62XDUUX;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.quickswitchmac.QuickSwitchUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.devsock.quickswitchUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -521,12 +529,13 @@
 		938803952FE8306D00D165A6 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = X3A62XDUUX;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.quickswitchmac.QuickSwitchUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.devsock.quickswitchUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;

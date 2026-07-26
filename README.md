@@ -17,11 +17,17 @@ applications.
 
 ## Setup
 
-1. Build and run. The app has no Dock icon; look for the window icon in the
-   menu bar.
+1. Move **QuickSwitch.app** to `/Applications`, then launch it. There is no Dock
+   icon; look for the window icon in the menu bar.
 2. Grant **Accessibility** access when prompted (System Settings → Privacy &
    Security → Accessibility). The setup window detects the change automatically
    — no relaunch.
+3. Turn on **Launch at Login** from the menu-bar item or Settings.
+
+> Launch at login uses `SMAppService`, so macOS lists QuickSwitch under System
+> Settings → General → Login Items and the user can revoke it there. macOS
+> refuses to register an app running from a build directory or a disk image —
+> `/Applications` is the reliable location.
 
 > Accessibility trust is tied to the code signature, so **every rebuild revokes
 > it**. Remove the stale entry in System Settings and re-add the new build.
@@ -156,6 +162,20 @@ become permanent:
 * A 30-second idle watchdog dismisses the panel regardless.
 * Clicking outside always dismisses — mouse monitoring, unlike keyboard
   monitoring, does not require Accessibility trust.
+
+## Display scaling
+
+The menu-bar icon is sized to an **even** number of points. The status bar
+centres its button image, so the vertical inset is `(22 - height) / 2`; SF
+Symbols default to a 15pt-tall image, which makes that 3.5pt. On a Retina
+display half a point is exactly one device pixel and looks perfect, but on a 1x
+display (a 1080p external monitor) it is *half a pixel* and the compositor
+resamples the whole glyph — the icon renders soft. An even height keeps the
+inset integral at every scale factor.
+
+The same reasoning fixes the menu header (32pt) and the About icon (64pt):
+both are native icon representation sizes, so each display draws a rep 1:1
+instead of rescaling one.
 
 ## Naming
 

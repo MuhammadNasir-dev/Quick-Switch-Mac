@@ -5,9 +5,32 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var authorizer: AccessibilityAuthorizer
+    @ObservedObject var launchAtLogin: LaunchAtLoginService
 
     var body: some View {
         Form {
+            Section("General") {
+                Toggle("Launch QuickSwitch at login", isOn: Binding(
+                    get: { launchAtLogin.isEnabled },
+                    set: { launchAtLogin.setEnabled($0) }
+                ))
+                .disabled(isLaunchAtLoginUnavailable)
+
+                if let explanation = launchAtLogin.explanation {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text(explanation)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if launchAtLogin.state == .requiresApproval {
+                            Button("Open Login Items") { launchAtLogin.openLoginItemsSettings() }
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Shortcut") {
                 Picker("Summon with", selection: $preferences.modifier) {
                     ForEach(SwitcherModifier.allCases, id: \.self) { modifier in
@@ -84,7 +107,17 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { launchAtLogin.refresh() }
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private extension SettingsView {
+    /// `unavailable` means the bundle sits somewhere macOS refuses to register,
+    /// so the switch would fail no matter how often it were flipped.
+    var isLaunchAtLoginUnavailable: Bool {
+        if case .unavailable = launchAtLogin.state { return true }
+        return false
     }
 }

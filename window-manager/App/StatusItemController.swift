@@ -16,17 +16,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let services: AppServices
     private let onOpenSettings: () -> Void
     private let onOpenOnboarding: () -> Void
+    private let onOpenAbout: () -> Void
     private var cancellables = Set<AnyCancellable>()
     private weak var windowCountItem: NSMenuItem?
+    private weak var headerViewRef: MenuHeaderView?
 
     init(
         services: AppServices,
         onOpenSettings: @escaping () -> Void,
-        onOpenOnboarding: @escaping () -> Void
+        onOpenOnboarding: @escaping () -> Void,
+        onOpenAbout: @escaping () -> Void
     ) {
         self.services = services
         self.onOpenSettings = onOpenSettings
         self.onOpenOnboarding = onOpenOnboarding
+        self.onOpenAbout = onOpenAbout
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -67,7 +71,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     /// Overall health, driving both the icon and the warning row in the menu.
-    private enum Health {
+    private enum Health: Equatable {
         case ready
         case needsAccessibility
         case inputFailed(HotKeyMonitor.Failure)
@@ -78,6 +82,37 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             case .ready: "macwindow.on.rectangle"
             case .needsAccessibility, .inputFailed: "exclamationmark.triangle"
             case .secureInput: "keyboard.badge.ellipsis"
+            }
+        }
+
+        /// Status line under the product name in the menu header.
+        var menuSubtitle: String {
+            switch self {
+            case .ready: "Ready"
+            case .needsAccessibility: "Accessibility access required"
+            case .inputFailed(.trustRevoked): "Accessibility access was revoked"
+            case .inputFailed(.repeatedTimeouts): "Shortcut disabled by the system"
+            case .secureInput: "Secure input active — shortcut paused"
+            }
+        }
+
+        /// The row offering a way out of this state, if there is one.
+        typealias Remedy = (title: String, symbol: String, selector: Selector?)
+
+        var remedy: Remedy? {
+            // A statement rather than a switch expression: the latter infers a
+            // single result type from the first case, which cannot reconcile
+            // `nil` with the tuple.
+            switch self {
+            case .ready:
+                return nil
+            case .needsAccessibility:
+                return ("Grant Accessibility Access…", "lock.shield", #selector(StatusItemController.openOnboarding))
+            case .inputFailed:
+                return ("Re-enable Shortcut", "arrow.clockwise", #selector(StatusItemController.retryInput))
+            case .secureInput:
+                // Nothing this app can do; another process holds secure input.
+                return ("Waiting for the other app to release it", "keyboard.badge.ellipsis", nil)
             }
         }
 
@@ -103,105 +138,44 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func configureButton() {
         guard let button = statusItem.button else { return }
         let health = self.health
-        button.image = NSImage(
-            systemSymbolName: health.symbolName,
-            accessibilityDescription: "QuickSwitch"
-        )
-        button.image?.isTemplate = true
+        button.image = Self.statusBarImage(health.symbolName)
         button.toolTip = health.tooltip
+        button.setAccessibilityLabel("QuickSwitch")
     }
 
-    private func rebuildMenu() {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-
-        // Derived from the same `Health` the icon uses, so the two can never
-        // disagree about whether anything is wrong.
-        switch health {
-        case .ready:
-            break
-
-        case .needsAccessibility:
-            let warning = NSMenuItem(
-                title: "Accessibility access required",
-                action: #selector(openOnboarding),
-                keyEquivalent: ""
-            )
-            warning.target = self
-            menu.addItem(warning)
-            menu.addItem(.separator())
-
-        case .inputFailed(let failure):
-            let title = switch failure {
-            case .trustRevoked: "Accessibility access was revoked"
-            case .repeatedTimeouts: "Shortcut disabled — the system kept dropping it"
-            }
-            let warning = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            warning.isEnabled = false
-            menu.addItem(warning)
-
-            let retry = NSMenuItem(title: "Re-enable Shortcut", action: #selector(retryInput), keyEquivalent: "")
-            retry.target = self
-            menu.addItem(retry)
-            menu.addItem(.separator())
-
-        case .secureInput:
-            let warning = NSMenuItem(
-                title: "Secure input is active — shortcut paused",
-                action: nil,
-                keyEquivalent: ""
-            )
-            warning.isEnabled = false
-            menu.addItem(warning)
-            menu.addItem(.separator())
+    /// Builds the menu-bar image so that it lands on whole pixels.
+    ///
+    /// The status bar centres the button image vertically, so the inset is
+    /// `(barThickness - imageHeight) / 2`. SF Symbols default to a **15pt-tall**
+    /// image and the bar is 22pt, which makes that inset 3.5pt — half a point.
+    ///
+    /// On a Retina display half a point is exactly one device pixel and looks
+    /// perfect. On a 1x display (a 1080p external monitor) it is *half a pixel*,
+    /// so the compositor resamples the entire glyph and it renders soft.
+    /// Forcing an **even** height keeps the inset integral at both scale
+    /// factors; the width is rounded to even as well, preserving the symbol's
+    /// aspect ratio, so horizontal centring is exact too.
+    private static func statusBarImage(_ name: String) -> NSImage? {
+        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: "QuickSwitch") else {
+            return nil
         }
 
-        let show = NSMenuItem(title: "Show Switcher", action: #selector(showSwitcher), keyEquivalent: "")
-        show.target = self
-        show.isEnabled = services.authorizer.isTrusted
-        menu.addItem(show)
+        let barThickness = NSStatusBar.system.thickness
+        // Leave a little breathing room in the bar, then snap down to even.
+        let targetHeight = roundedToEven(min(18, barThickness - 4))
+        let aspect = image.size.height > 0 ? image.size.width / image.size.height : 1
+        let targetWidth = roundedToEven(targetHeight * aspect)
 
-        let count = NSMenuItem(title: windowCountTitle, action: nil, keyEquivalent: "")
-        count.isEnabled = false
-        menu.addItem(count)
-        windowCountItem = count
-
-        menu.addItem(.separator())
-
-        let layoutItem = NSMenuItem(title: "Layout", action: nil, keyEquivalent: "")
-        let layoutMenu = NSMenu()
-        for layout in SwitcherLayout.allCases {
-            let item = NSMenuItem(title: layout.displayName, action: #selector(selectLayout(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = layout.rawValue
-            item.state = services.preferences.layout == layout ? .on : .off
-            layoutMenu.addItem(item)
-        }
-        layoutItem.submenu = layoutMenu
-        menu.addItem(layoutItem)
-
-        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
-        settings.target = self
-        menu.addItem(settings)
-
-        let help = NSMenuItem(title: "Setup Guide…", action: #selector(openOnboarding), keyEquivalent: "")
-        help.target = self
-        menu.addItem(help)
-
-        menu.addItem(.separator())
-
-        let quit = NSMenuItem(title: "Quit QuickSwitch", action: #selector(quit), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
-
-        menu.delegate = self
-        statusItem.menu = menu
+        image.size = NSSize(width: targetWidth, height: targetHeight)
+        // Template rendering lets macOS invert it for dark menu bars and for
+        // the highlighted state.
+        image.isTemplate = true
+        return image
     }
 
-    /// Freshens the live window count at the moment the menu is shown, which is
-    /// cheaper and more accurate than rebuilding on every index update.
-    func menuWillOpen(_ menu: NSMenu) {
-        windowCountItem?.title = windowCountTitle
+    /// Rounds to the nearest even number of points, never below 2.
+    static func roundedToEven(_ value: CGFloat) -> CGFloat {
+        max(2, (value / 2).rounded() * 2)
     }
 
     private var windowCountTitle: String {
@@ -209,12 +183,171 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return count == 1 ? "1 window tracked" : "\(count) windows tracked"
     }
 
-    @objc private func retryInput() {
+    private func rebuildMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.delegate = self
+
+        let health = self.health
+
+        // 1. Branded header: app icon, product name, live status, gear button.
+        let header = NSMenuItem()
+        let headerView = MenuHeaderView(onOpenSettings: { [weak self] in self?.onOpenSettings() })
+        headerView.update(subtitle: health.menuSubtitle, isWarning: health != .ready)
+        header.view = headerView
+        menu.addItem(header)
+        headerViewRef = headerView
+
+        menu.addItem(.separator())
+
+        // 2. Whatever is stopping the app working, with the action that fixes it.
+        if let remedy = health.remedy {
+            let warning = NSMenuItem(title: remedy.title, action: remedy.selector, keyEquivalent: "")
+            warning.image = Self.symbol(remedy.symbol, tint: .systemOrange)
+            warning.target = remedy.selector == nil ? nil : self
+            warning.isEnabled = remedy.selector != nil
+            menu.addItem(warning)
+            menu.addItem(.separator())
+        }
+
+        // 3. The primary action.
+        let show = NSMenuItem(title: "Open Switcher", action: #selector(showSwitcher), keyEquivalent: "")
+        show.image = Self.symbol("rectangle.stack")
+        show.target = self
+        show.isEnabled = services.authorizer.isTrusted
+        show.attributedTitle = Self.titleWithShortcut(
+            "Open Switcher",
+            shortcut: "\(services.preferences.modifier.symbol)⇥"
+        )
+        menu.addItem(show)
+
+        let count = NSMenuItem(title: windowCountTitle, action: nil, keyEquivalent: "")
+        count.image = Self.symbol("macwindow")
+        count.isEnabled = false
+        menu.addItem(count)
+        windowCountItem = count
+
+        // 4. Layouts, inline with icons and a tick on the active one, so the
+        //    current choice is visible without opening a submenu.
+        menu.addItem(.separator())
+        menu.addItem(MenuSectionHeader.item("Layout"))
+        for layout in SwitcherLayout.allCases {
+            let item = NSMenuItem(
+                title: layout.displayName,
+                action: #selector(selectLayout(_:)),
+                keyEquivalent: ""
+            )
+            item.image = Self.symbol(layout.symbolName)
+            item.target = self
+            item.representedObject = layout.rawValue
+            item.state = services.preferences.layout == layout ? .on : .off
+            menu.addItem(item)
+        }
+
+        // 5. Everything else.
+        menu.addItem(.separator())
+
+        let launch = NSMenuItem(
+            title: "Launch at Login",
+            action: #selector(toggleLaunchAtLogin),
+            keyEquivalent: ""
+        )
+        launch.image = Self.symbol("power")
+        launch.target = self
+        launch.state = services.launchAtLogin.isEnabled ? .on : .off
+        if case .unavailable = services.launchAtLogin.state {
+            launch.isEnabled = false
+        }
+        if let explanation = services.launchAtLogin.explanation {
+            launch.toolTip = explanation
+        }
+        menu.addItem(launch)
+
+        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.image = Self.symbol("gearshape")
+        settings.target = self
+        menu.addItem(settings)
+
+        let help = NSMenuItem(title: "Setup Guide…", action: #selector(openOnboarding), keyEquivalent: "")
+        help.image = Self.symbol("questionmark.circle")
+        help.target = self
+        menu.addItem(help)
+
+        let about = NSMenuItem(title: "About \(AppInfo.name)", action: #selector(openAbout), keyEquivalent: "")
+        about.image = Self.symbol("info.circle")
+        about.target = self
+        menu.addItem(about)
+
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(title: "Quit QuickSwitch", action: #selector(quit), keyEquivalent: "q")
+        quit.image = Self.symbol("xmark.circle")
+        quit.target = self
+        menu.addItem(quit)
+
+        statusItem.menu = menu
+    }
+
+    /// A consistently sized, template-rendered SF Symbol for a menu row.
+    ///
+    /// Menu images are not resized by AppKit, so an unconstrained symbol makes
+    /// rows different heights. Template rendering lets the system tint them for
+    /// the highlighted row and for both appearances.
+    private static func symbol(_ name: String, tint: NSColor? = nil) -> NSImage? {
+        var configuration = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        if let tint {
+            // A palette configuration keeps the colour inside the symbol
+            // renderer, so it still adapts to appearance changes — unlike
+            // drawing a tinted copy into a bitmap.
+            configuration = configuration.applying(.init(paletteColors: [tint]))
+        }
+        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration) else { return nil }
+        // Template rendering lets AppKit invert the symbol on the highlighted
+        // row; a palette-coloured warning keeps its own colour deliberately.
+        image.isTemplate = tint == nil
+        return image
+    }
+
+    /// Renders "Title    ⌥⇥" with the shortcut dimmed and trailing.
+    ///
+    /// `keyEquivalent` cannot express a modifier-plus-Tab binding that the app
+    /// handles through an event tap rather than through the responder chain, so
+    /// the hint is drawn rather than declared.
+    private static func titleWithShortcut(_ title: String, shortcut: String) -> NSAttributedString {
+        let result = NSMutableAttributedString(
+            string: title,
+            attributes: [.font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.labelColor]
+        )
+        result.append(NSAttributedString(
+            string: "   \(shortcut)",
+            attributes: [
+                .font: NSFont.menuFont(ofSize: 0),
+                .foregroundColor: NSColor.tertiaryLabelColor
+            ]
+        ))
+        return result
+    }
+
+    /// Reinstalls the event tap after it was abandoned. User-initiated by
+    /// design — see `AppServices.restartInput()`.
+    @objc func retryInput() {
         services.restartInput()
+        rebuildMenu()
     }
 
     @objc private func showSwitcher() {
         services.switcher.showPinned()
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        services.launchAtLogin.toggle()
+        // `requiresApproval` cannot be resolved from here — send the user to
+        // the one place that can.
+        if services.launchAtLogin.state == .requiresApproval {
+            services.launchAtLogin.openLoginItemsSettings()
+        }
+        rebuildMenu()
     }
 
     @objc private func selectLayout(_ sender: NSMenuItem) {
@@ -228,7 +361,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         onOpenSettings()
     }
 
-    @objc private func openOnboarding() {
+    @objc private func openAbout() {
+        onOpenAbout()
+    }
+
+    @objc func openOnboarding() {
         onOpenOnboarding()
     }
 

@@ -18,7 +18,8 @@ struct WindowManagerApp: App {
             if let services = appDelegate.services {
                 SettingsView(
                     preferences: services.preferences,
-                    authorizer: services.authorizer
+                    authorizer: services.authorizer,
+                    launchAtLogin: services.launchAtLogin
                 )
             } else {
                 // Only reachable if the scene body runs before
@@ -41,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var statusItem: StatusItemController?
     private var onboarding: UtilityWindowController<OnboardingView>?
     private var settings: UtilityWindowController<SettingsView>?
+    private var about: UtilityWindowController<AboutView>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
@@ -63,15 +65,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let settings = UtilityWindowController(title: "QuickSwitch Settings") {
                 SettingsView(
                     preferences: services.preferences,
-                    authorizer: services.authorizer
+                    authorizer: services.authorizer,
+                    launchAtLogin: services.launchAtLogin
                 )
             }
             self.settings = settings
 
+            let about = UtilityWindowController(title: "About \(AppInfo.name)") {
+                AboutView { [weak self] in self?.about?.close() }
+            }
+            self.about = about
+
             self.statusItem = StatusItemController(
                 services: services,
                 onOpenSettings: { [weak settings] in settings?.show() },
-                onOpenOnboarding: { [weak onboarding] in onboarding?.show() }
+                onOpenOnboarding: { [weak onboarding] in onboarding?.show() },
+                onOpenAbout: { [weak about] in about?.show() }
             )
 
             // First run, or trust revoked by a rebuild: explain rather than

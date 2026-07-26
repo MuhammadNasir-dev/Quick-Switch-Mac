@@ -42,16 +42,26 @@ struct OnboardingView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "macwindow.on.rectangle")
-                .font(.system(size: 30))
-                .foregroundStyle(Color.accentColor)
+        HStack(spacing: 14) {
+            // The real bundle icon rather than an SF Symbol, so the setup
+            // window matches the Dock, the menu bar and About. 48pt is not a
+            // native representation size, but the icon is drawn from the 128px
+            // rep downscaled, which stays sharp — unlike upscaling a 32px one.
+            Image(nsImage: AppInfo.icon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 48, height: 48)
+                .accessibilityHidden(true)
+
             VStack(alignment: .leading, spacing: 2) {
-                Text("QuickSwitch")
+                Text(AppInfo.name)
                     .font(.title2.weight(.semibold))
                 Text("Switch between every open window, not just apps.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                Text("Version \(AppInfo.displayVersion)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
     }
