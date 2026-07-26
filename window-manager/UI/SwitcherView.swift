@@ -20,6 +20,22 @@ struct SwitcherView: View {
 
     private var layout: SwitcherLayout { preferences.layout }
 
+    /// Index of the row currently pinned to the top of the scroll area.
+    ///
+    /// The scroll position is tracked explicitly rather than delegating to
+    /// `scrollTo`'s built-in heuristics. Anchoring to `.center` drags the list
+    /// under a stationary highlight; passing no anchor leaves the behaviour up
+    /// to SwiftUI, which cannot compute a minimal scroll for rows a `LazyVStack`
+    /// has not realised yet. Knowing the first visible row makes it exact: only
+    /// scroll when the selection crosses an edge, and by exactly one row.
+    @State private var firstVisibleIndex = 0
+
+    /// How many items fit without scrolling, in the current layout.
+    private var visibleItemCount: Int {
+        let rows = layout.visibleRowLimit(forConfiguredRows: preferences.maximumVisibleRows)
+        return max(1, rows * layout.columnCount)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -129,6 +145,17 @@ struct SwitcherView: View {
                 scroll(proxy, to: newValue)
             }
             .onChange(of: preferences.layout) { _, _ in
+                // Column count changed, so the previous anchor is meaningless.
+                firstVisibleIndex = 0
+                scroll(proxy, to: viewModel.selectedIndex, animated: false)
+            }
+            .onChange(of: viewModel.sessionToken) { _, _ in
+                firstVisibleIndex = 0
+                scroll(proxy, to: viewModel.selectedIndex, animated: false)
+            }
+            .onChange(of: viewModel.query) { _, _ in
+                // Filtering rebuilds the list from the top.
+                firstVisibleIndex = 0
                 scroll(proxy, to: viewModel.selectedIndex, animated: false)
             }
         }
@@ -187,20 +214,43 @@ struct SwitcherView: View {
         .padding(.vertical, SwitcherMetrics.contentPadding)
     }
 
-    /// Scrolls the selection into view with *minimal* movement.
+    /// Keeps the selection visible, scrolling only when it crosses an edge.
     ///
-    /// Deliberately no anchor. Anchoring to `.center` keeps the highlight pinned
-    /// mid-panel and scrolls the list underneath it, which reads as the
-    /// selection jumping backwards as soon as you pass the middle row. Minimal
-    /// scrolling leaves the list still until the selection actually reaches an
-    /// edge — the behaviour every native list has.
+    /// The scroll target is always the row that should sit at the *top* of the
+    /// viewport, anchored to `.top` — a fully determined position, so the list
+    /// cannot drift. While the selection is already on screen nothing moves at
+    /// all, which is what makes arrowing through a list feel steady.
     private func scroll(_ proxy: ScrollViewProxy, to index: Int, animated: Bool = true) {
-        guard viewModel.rows.indices.contains(index) else { return }
-        let target = viewModel.rows[index].id
-        if animated {
-            withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(target) }
+        let rows = viewModel.rows
+        guard rows.indices.contains(index) else { return }
+
+        let visible = visibleItemCount
+        guard rows.count > visible else {
+            // Everything fits; there is nothing to scroll.
+            if firstVisibleIndex != 0 { firstVisibleIndex = 0 }
+            return
+        }
+
+        var first = firstVisibleIndex
+        if index < first {
+            first = index
+        } else if index >= first + visible {
+            first = index - visible + 1
         } else {
-            proxy.scrollTo(target)
+            return // already visible
+        }
+        first = min(max(0, first), rows.count - visible)
+        guard first != firstVisibleIndex else { return }
+
+        firstVisibleIndex = first
+        // Align to a row boundary in the grid so cards never sit half-scrolled.
+        let aligned = first - (first % max(1, layout.columnCount))
+        let target = rows[min(aligned, rows.count - 1)].id
+
+        if animated {
+            withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(target, anchor: .top) }
+        } else {
+            proxy.scrollTo(target, anchor: .top)
         }
     }
 

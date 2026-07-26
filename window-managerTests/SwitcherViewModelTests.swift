@@ -496,3 +496,131 @@ struct GroupedLayoutTests {
         #expect(model.rows[3].window.appName == "VS Code")
     }
 }
+
+// MARK: - Session stability
+
+@MainActor
+@Suite("Session ordering stability")
+struct SessionOrderTests {
+    private func makeModel(
+        windows: [AppWindow] = WindowFixtures.browserAndEditor()
+    ) -> SwitcherViewModel {
+        let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)") ?? .standard
+        let preferences = Preferences(defaults: defaults)
+        preferences.showActiveAppWindowsFirst = false
+        let model = SwitcherViewModel(
+            preferences: preferences,
+            iconProvider: IconProvider(),
+            frontmostPID: { nil }
+        )
+        model.ingest(windows)
+        return model
+    }
+
+    @Test("A background reorder does not move rows while the panel is open")
+    func orderIsFrozenDuringSession() {
+        // Regression: `WindowIndex` re-sorts by recency on every refresh, and
+        // refreshes fire while the panel is open. Rows used to shuffle
+        // mid-navigation, which read as the selection jumping to the top.
+        let model = makeModel()
+        model.beginSession(reverse: false)
+        let opening = model.rows.map(\.window.id)
+
+        // The index delivers the same windows in a completely different order.
+        model.ingest(WindowFixtures.browserAndEditor().reversed())
+
+        #expect(model.rows.map(\.window.id) == opening)
+    }
+
+    @Test("The highlight stays on the same row index across a reorder")
+    func selectionIndexIsStable() {
+        let model = makeModel()
+        model.beginSession(reverse: false)
+        model.select(at: 4)
+        let selectedID = model.selectedWindow?.id
+
+        model.ingest(WindowFixtures.browserAndEditor().reversed())
+
+        #expect(model.selectedIndex == 4)
+        #expect(model.selectedWindow?.id == selectedID)
+    }
+
+    @Test("Repeated advancing walks the whole list exactly once")
+    func advancingVisitsEveryRowInOrder() {
+        // Mirrors holding the modifier and tapping Tab, with the window index
+        // pushing a reordered snapshot between every press.
+        let model = makeModel()
+        model.beginSession(reverse: false)
+        let expected = model.rows.map(\.window.id)
+
+        var visited: [CGWindowID] = [model.selectedWindow?.id].compactMap { $0 }
+        for _ in 1..<expected.count {
+            model.ingest(WindowFixtures.browserAndEditor().shuffled())
+            model.move(by: 1)
+            if let id = model.selectedWindow?.id { visited.append(id) }
+        }
+
+        #expect(visited.count == expected.count)
+        #expect(Set(visited).count == expected.count, "Every window must be visited exactly once")
+        // Starting at index 1 and wrapping, the walk is the opening order
+        // rotated by one.
+        #expect(visited == Array(expected[1...]) + [expected[0]])
+    }
+
+    @Test("Newly opened windows are appended, never inserted mid-list")
+    func newWindowsAppend() {
+        let model = makeModel()
+        model.beginSession(reverse: false)
+        let opening = model.rows.map(\.window.id)
+
+        var updated = WindowFixtures.browserAndEditor()
+        updated.insert(WindowFixtures.make(id: 99, app: "Mail", title: "Inbox", pid: 50), at: 0)
+        model.ingest(updated)
+
+        #expect(model.rows.map(\.window.id) == opening + [99])
+    }
+
+    @Test("A closed window drops out without disturbing the rest")
+    func closedWindowsDropOut() {
+        let model = makeModel()
+        model.beginSession(reverse: false)
+        let opening = model.rows.map(\.window.id)
+
+        model.ingest(WindowFixtures.browserAndEditor().filter { $0.id != 3 })
+
+        #expect(model.rows.map(\.window.id) == opening.filter { $0 != 3 })
+    }
+
+    @Test("The next session picks up the current order again")
+    func orderRefreshesOnReopen() {
+        let model = makeModel()
+        model.beginSession(reverse: false)
+        model.endSession()
+
+        let reordered = Array(WindowFixtures.browserAndEditor().reversed())
+        model.ingest(reordered)
+        model.beginSession(reverse: false)
+
+        #expect(model.rows.map(\.window.id) == reordered.map(\.id))
+    }
+
+    @Test("Searching still ranks by relevance, not by the frozen order")
+    func searchOverridesFrozenOrder() {
+        let model = makeModel()
+        model.beginSession(reverse: false)
+        model.insertText("git")
+        #expect(model.rows.first?.window.title == "GitHub")
+
+        // Clearing the query restores the session order rather than re-sorting.
+        model.clearQuery()
+        #expect(model.rows.first?.window.title == "ChatGPT — OpenAI")
+    }
+
+    @Test("Each session bumps the token so the view can reset its scroll")
+    func sessionTokenAdvances() {
+        let model = makeModel()
+        let before = model.sessionToken
+        model.beginSession(reverse: false)
+        #expect(model.sessionToken != before)
+    }
+}

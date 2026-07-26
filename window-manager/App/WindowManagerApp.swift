@@ -8,8 +8,12 @@ struct WindowManagerApp: App {
 
     var body: some Scene {
         // The app has no primary window: it is a background agent whose UI is a
-        // floating panel plus a menu-bar item. `Settings` is the only scene, so
-        // ⌘, and the menu-bar item both have somewhere to go.
+        // floating panel plus a menu-bar item.
+        //
+        // `Settings` is declared because `App` requires at least one scene, and
+        // it renders the real settings so ⌘, is correct if macOS ever routes it
+        // here. The menu-bar item does *not* rely on it — see
+        // `UtilityWindowController` for why.
         Settings {
             if let services = appDelegate.services {
                 SettingsView(
@@ -35,8 +39,8 @@ struct WindowManagerApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private(set) var services: AppServices?
     private var statusItem: StatusItemController?
-    private var onboarding: OnboardingWindowController?
-    private var windowCloseObserver: NSObjectProtocol?
+    private var onboarding: UtilityWindowController<OnboardingView>?
+    private var settings: UtilityWindowController<SettingsView>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
@@ -46,17 +50,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let services = AppServices()
             self.services = services
 
-            let onboarding = OnboardingWindowController(
-                authorizer: services.authorizer,
-                preferences: services.preferences
-            )
+            let onboarding = UtilityWindowController(title: "Window Switcher Setup") {
+                OnboardingView(
+                    authorizer: services.authorizer,
+                    preferences: services.preferences
+                ) { [weak self] in
+                    self?.onboarding?.close()
+                }
+            }
             self.onboarding = onboarding
 
-            self.statusItem = StatusItemController(services: services) { [weak onboarding] in
-                onboarding?.show()
+            let settings = UtilityWindowController(title: "Window Switcher Settings") {
+                SettingsView(
+                    preferences: services.preferences,
+                    authorizer: services.authorizer
+                )
             }
+            self.settings = settings
 
-            observeWindowClosing()
+            self.statusItem = StatusItemController(
+                services: services,
+                onOpenSettings: { [weak settings] in settings?.show() },
+                onOpenOnboarding: { [weak onboarding] in onboarding?.show() }
+            )
 
             // First run, or trust revoked by a rebuild: explain rather than
             // silently doing nothing.
@@ -67,33 +83,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
-    /// Returns the app to `.accessory` once its last ordinary window closes.
-    ///
-    /// Showing Settings or the setup guide requires `.regular` (an accessory
-    /// app cannot bring a normal window forward), but staying `.regular` would
-    /// leave a Dock icon behind for a background utility. `OnboardingWindow`
-    /// handles its own case; this covers the SwiftUI `Settings` scene, whose
-    /// window this app never gets a direct reference to.
-    private func observeWindowClosing() {
-        windowCloseObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.willCloseNotification,
-            object: nil,
-            queue: .main
-        ) { notification in
-            MainActor.assumeIsolated {
-                guard let closing = notification.object as? NSWindow, closing.canBecomeMain else { return }
-                // The closing window is still in `NSApp.windows` at this point.
-                let remaining = NSApp.windows.contains {
-                    $0 !== closing && $0.isVisible && $0.canBecomeMain
-                }
-                guard !remaining else { return }
-                NSApp.setActivationPolicy(.accessory)
-            }
-        }
-    }
-
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
+            // Explicit teardown: the event tap is a system-wide resource and
+            // the AX observers hold run-loop sources, neither of which should
+            // be left to process exit.
             services?.hotKeyMonitor.stop()
             services?.windowIndex.stop()
         }

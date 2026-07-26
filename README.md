@@ -92,6 +92,18 @@ second entry is whatever you were on immediately before.
 Opening the panel reads the warm cache and schedules a refresh; it never blocks
 on Accessibility IPC.
 
+The row **order is frozen for the duration of a session**. The index keeps
+re-sorting by most-recent-use in the background — and refreshes fire while the
+panel is open, triggered by a title change in any application — so without this
+the list would shuffle under the user mid-keystroke. Windows still appear,
+disappear and retitle live; only the ordering is pinned, and only until the
+panel closes.
+
+Settings and the setup guide are AppKit windows owned by `UtilityWindowController`
+rather than the SwiftUI `Settings` scene: opening that scene from a menu-bar item
+depends on the private `showSettingsWindow:` action reaching a responder that an
+`.accessory` app does not reliably have.
+
 ## Tests
 
 ```bash

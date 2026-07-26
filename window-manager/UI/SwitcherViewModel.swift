@@ -21,6 +21,9 @@ final class SwitcherViewModel: ObservableObject {
     /// `true` once the user has typed, which pins the panel open.
     @Published private(set) var isPinned: Bool = false
     @Published private(set) var isAccessibilityTrusted: Bool = true
+    /// Increments on every `beginSession`, letting the view reset per-session
+    /// display state (such as the scroll position) without inspecting the rows.
+    @Published private(set) var sessionToken: Int = 0
 
     struct Row: Identifiable, Equatable {
         let window: AppWindow
@@ -55,6 +58,20 @@ final class SwitcherViewModel: ObservableObject {
     /// activates a window the frontmost app changes, and the list must not
     /// reshuffle underneath the user mid-session.
     private var sessionFrontmostPID: pid_t?
+
+    /// Window order frozen for the duration of a session.
+    ///
+    /// `WindowIndex` re-sorts by most-recent-use on every refresh, and
+    /// refreshes fire while the panel is open — a title change in any
+    /// application, the periodic revalidation, or the refresh scheduled when
+    /// the panel opens. Without freezing, rows shuffle *underneath the user
+    /// mid-keystroke*: the highlight stays on its window but that window's
+    /// position jumps, which reads as the selection leaping back to the top
+    /// after a few presses.
+    ///
+    /// New windows are appended, closed ones drop out, and titles still update
+    /// live — only the ordering is pinned, and only until the panel closes.
+    private var sessionOrder: [CGWindowID]?
 
     /// - Parameter frontmostPID: `nil` uses `NSWorkspace`. A default *expression*
     ///   cannot be used here because it would be evaluated outside the main actor.
@@ -116,7 +133,12 @@ final class SwitcherViewModel: ObservableObject {
         query = ""
         isPinned = false
         sessionFrontmostPID = frontmostPID()
+        // Clear first so the fresh ordering is computed from live recency,
+        // then pin whatever that produced for the rest of the session.
+        sessionOrder = nil
         rebuildRows(preservingSelection: false)
+        sessionOrder = rows.map(\.id)
+        sessionToken &+= 1
 
         guard !rows.isEmpty else {
             selectedIndex = 0
@@ -131,6 +153,7 @@ final class SwitcherViewModel: ObservableObject {
         query = ""
         isPinned = false
         sessionFrontmostPID = nil
+        sessionOrder = nil
     }
 
     /// Keeps the panel open until Return or Escape, leaving the selection alone.
@@ -240,7 +263,11 @@ final class SwitcherViewModel: ObservableObject {
             // Every window of the app you are currently in, first — then the
             // rest in most-recently-used order. Applied only to the unfiltered
             // list: once you are searching, relevance beats grouping.
-            if preferences.showActiveAppWindowsFirst, let frontPID = sessionFrontmostPID {
+            if let sessionOrder {
+                // A session is in progress: hold the order the panel opened
+                // with. Windows opened since are appended in arrival order.
+                candidates = Self.applying(order: sessionOrder, to: candidates)
+            } else if preferences.showActiveAppWindowsFirst, let frontPID = sessionFrontmostPID {
                 candidates = candidates.filter { $0.pid == frontPID }
                     + candidates.filter { $0.pid != frontPID }
             }
@@ -276,6 +303,25 @@ final class SwitcherViewModel: ObservableObject {
         } else {
             selectedIndex = min(selectedIndex, max(rows.count - 1, 0))
         }
+    }
+
+    /// Reorders `windows` to match a previously captured sequence.
+    ///
+    /// Windows absent from `order` (opened since the session began) keep their
+    /// incoming relative order and go last. The explicit offset tie-break makes
+    /// this deterministic — `sorted(by:)` is not a stable sort in Swift.
+    private static func applying(order: [CGWindowID], to windows: [AppWindow]) -> [AppWindow] {
+        var rank: [CGWindowID: Int] = [:]
+        rank.reserveCapacity(order.count)
+        for (index, id) in order.enumerated() { rank[id] = index }
+
+        return windows.enumerated()
+            .sorted { lhs, rhs in
+                let lhsRank = rank[lhs.element.id] ?? Int.max
+                let rhsRank = rank[rhs.element.id] ?? Int.max
+                return lhsRank == rhsRank ? lhs.offset < rhs.offset : lhsRank < rhsRank
+            }
+            .map(\.element)
     }
 
     /// Makes each application's windows contiguous without disturbing which

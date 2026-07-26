@@ -14,11 +14,17 @@ import os
 final class StatusItemController {
     private let statusItem: NSStatusItem
     private let services: AppServices
+    private let onOpenSettings: () -> Void
     private let onOpenOnboarding: () -> Void
     private var cancellables = Set<AnyCancellable>()
 
-    init(services: AppServices, onOpenOnboarding: @escaping () -> Void) {
+    init(
+        services: AppServices,
+        onOpenSettings: @escaping () -> Void,
+        onOpenOnboarding: @escaping () -> Void
+    ) {
         self.services = services
+        self.onOpenSettings = onOpenSettings
         self.onOpenOnboarding = onOpenOnboarding
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -132,34 +138,8 @@ final class StatusItemController {
         rebuildMenu()
     }
 
-    /// Opens the SwiftUI `Settings` scene.
-    ///
-    /// Two things have to be right, and the previous implementation got both
-    /// wrong, so the menu item silently did nothing:
-    ///
-    /// 1. The action must be *sent through the responder chain*
-    ///    (`sendAction(_:to:nil)`). SwiftUI installs the handler on an internal
-    ///    responder, not on `NSApplication`, so `NSApp.responds(to:)` is false
-    ///    and `NSApp.perform(_:)` never reaches it.
-    /// 2. The app is an `.accessory`, which cannot show an ordinary window that
-    ///    the user can interact with. It has to become `.regular` first —
-    ///    `AppDelegate` drops it back to `.accessory` when the window closes.
     @objc private func openSettings() {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-
-        // The selector was renamed in macOS 14; try the modern one, then fall
-        // back. `sendAction` returns false when nothing handled it.
-        let selectors = [Selector(("showSettingsWindow:")), Selector(("showPreferencesWindow:"))]
-        for selector in selectors where NSApp.sendAction(selector, to: nil, from: nil) {
-            return
-        }
-
-        // Neither responded: surface the setup window rather than appearing to
-        // do nothing, and undo the policy change.
-        Log.ui.error("Could not open the Settings scene")
-        NSApp.setActivationPolicy(.accessory)
-        onOpenOnboarding()
+        onOpenSettings()
     }
 
     @objc private func openOnboarding() {
