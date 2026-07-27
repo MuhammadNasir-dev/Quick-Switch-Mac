@@ -21,9 +21,7 @@ enum AppInfo {
     }
 
     static let copyright: String = string("NSHumanReadableCopyright")
-        ?? "© \(Calendar.current.component(.year, from: Date())) QuickSwitch"
-
-    static let bundleIdentifier: String = Bundle.main.bundleIdentifier ?? "com.devsock.quickswitch"
+        ?? "© \(Calendar.current.component(.year, from: Date())) QuickSwitchMac"
 
     static let website = URL(string: "https://quickswitchmac.com") ?? URL(fileURLWithPath: "/")
 

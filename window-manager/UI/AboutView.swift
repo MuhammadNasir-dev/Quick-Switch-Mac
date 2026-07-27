@@ -49,23 +49,14 @@ struct AboutView: View {
 
             Divider()
 
-            VStack(spacing: 6) {
-                Text(AppInfo.copyright)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                // Useful when helping someone debug a permissions problem —
-                // System Settings lists apps by identity, not by display name.
-                Text(AppInfo.bundleIdentifier)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.quaternary)
-                    .textSelection(.enabled)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .padding(.horizontal, 24)
+            Text(AppInfo.copyright)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .padding(.horizontal, 24)
 
             Divider()
 
