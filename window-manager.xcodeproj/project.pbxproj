@@ -6,6 +6,20 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildRule section */
+		93B5A5CB3017685000DE6FFD /* PBXBuildRule */ = {
+			isa = PBXBuildRule;
+			compilerSpec = com.apple.compilers.proxy.script;
+			fileType = file.skybox;
+			inputFiles = (
+			);
+			isEditable = 1;
+			outputFiles = (
+			);
+			script = "# realitytool\n";
+		};
+/* End PBXBuildRule section */
+
 /* Begin PBXContainerItemProxy section */
 		9388037A2FE8306D00D165A6 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -149,6 +163,7 @@
 				938803812FE8306D00D165A6 /* Resources */,
 			);
 			buildRules = (
+				93B5A5CB3017685000DE6FFD /* PBXBuildRule */,
 			);
 			dependencies = (
 				938803852FE8306D00D165A6 /* PBXTargetDependency */,
