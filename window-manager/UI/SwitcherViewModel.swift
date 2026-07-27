@@ -62,19 +62,24 @@ final class SwitcherViewModel: ObservableObject {
     /// reshuffle underneath the user mid-session.
     private var sessionFrontmostPID: pid_t?
 
-    /// Window order frozen for the duration of a session.
+    /// The exact rows a session opened with: membership *and* order.
     ///
-    /// `WindowIndex` re-sorts by most-recent-use on every refresh, and
-    /// refreshes fire while the panel is open — a title change in any
-    /// application, the periodic revalidation, or the refresh scheduled when
-    /// the panel opens. Without freezing, rows shuffle *underneath the user
-    /// mid-keystroke*: the highlight stays on its window but that window's
-    /// position jumps, which reads as the selection leaping back to the top
-    /// after a few presses.
+    /// `WindowIndex` republishes constantly while the panel is up — a title
+    /// change in any application, the periodic revalidation, the refresh
+    /// scheduled on open, and windows on other Spaces flapping in and out as
+    /// Accessibility does or does not report them.
     ///
-    /// New windows are appended, closed ones drop out, and titles still update
-    /// live — only the ordering is pinned, and only until the panel closes.
-    private var sessionOrder: [CGWindowID]?
+    /// Freezing only the order was not enough. A single window appearing or
+    /// disappearing shifts the index of everything below it, so a keystroke
+    /// lands on a different row than the one the user was aiming at — walking
+    /// down a list would jump backwards every few presses. It shows up in the
+    /// list far more than the grid purely because an arrow key moves one row
+    /// there and a whole row of five in the grid.
+    ///
+    /// Contents are still refreshed from each snapshot, so titles and Space
+    /// badges stay live; only which windows are listed, and in what order, is
+    /// pinned — and only until the panel closes.
+    private var sessionWindows: [AppWindow]?
 
     /// - Parameter frontmostPID: `nil` uses `NSWorkspace`. A default *expression*
     ///   cannot be used here because it would be evaluated outside the main actor.
@@ -146,9 +151,9 @@ final class SwitcherViewModel: ObservableObject {
         sessionFrontmostPID = frontmostPID()
         // Clear first so the fresh ordering is computed from live recency,
         // then pin whatever that produced for the rest of the session.
-        sessionOrder = nil
+        sessionWindows = nil
         rebuildRows(preservingSelection: false)
-        sessionOrder = rows.map(\.id)
+        sessionWindows = rows.map(\.window)
         sessionToken &+= 1
 
         guard !rows.isEmpty else {
@@ -164,7 +169,7 @@ final class SwitcherViewModel: ObservableObject {
         query = ""
         isPinned = false
         sessionFrontmostPID = nil
-        sessionOrder = nil
+        sessionWindows = nil
     }
 
     /// Pins or unpins the selected window's application.
@@ -214,6 +219,12 @@ final class SwitcherViewModel: ObservableObject {
     func moveToEdge(first: Bool) {
         guard !rows.isEmpty else { return }
         selectedIndex = first ? 0 : rows.count - 1
+    }
+
+    /// Selects a specific window, if it is still listed.
+    func select(window: AppWindow) {
+        guard let index = rows.firstIndex(where: { $0.id == window.id }) else { return }
+        selectedIndex = index
     }
 
     func select(at index: Int) {
@@ -288,10 +299,12 @@ final class SwitcherViewModel: ObservableObject {
             // Every window of the app you are currently in, first — then the
             // rest in most-recently-used order. Applied only to the unfiltered
             // list: once you are searching, relevance beats grouping.
-            if let sessionOrder {
-                // A session is in progress: hold the order the panel opened
-                // with. Windows opened since are appended in arrival order.
-                candidates = Self.applying(order: sessionOrder, to: candidates)
+            if let sessionWindows {
+                // A session is in progress: show exactly what it opened with,
+                // refreshed in place. Nothing is added or removed, so an index
+                // means the same row for as long as the panel is up.
+                let latest = Dictionary(allWindows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                candidates = sessionWindows.map { latest[$0.id] ?? $0 }
             } else {
                 if preferences.showActiveAppWindowsFirst, let frontPID = sessionFrontmostPID {
                     candidates = candidates.filter { $0.pid == frontPID }
@@ -335,25 +348,6 @@ final class SwitcherViewModel: ObservableObject {
         } else {
             selectedIndex = min(selectedIndex, max(rows.count - 1, 0))
         }
-    }
-
-    /// Reorders `windows` to match a previously captured sequence.
-    ///
-    /// Windows absent from `order` (opened since the session began) keep their
-    /// incoming relative order and go last. The explicit offset tie-break makes
-    /// this deterministic — `sorted(by:)` is not a stable sort in Swift.
-    private static func applying(order: [CGWindowID], to windows: [AppWindow]) -> [AppWindow] {
-        var rank: [CGWindowID: Int] = [:]
-        rank.reserveCapacity(order.count)
-        for (index, id) in order.enumerated() { rank[id] = index }
-
-        return windows.enumerated()
-            .sorted { lhs, rhs in
-                let lhsRank = rank[lhs.element.id] ?? Int.max
-                let rhsRank = rank[rhs.element.id] ?? Int.max
-                return lhsRank == rhsRank ? lhs.offset < rhs.offset : lhsRank < rhsRank
-            }
-            .map(\.element)
     }
 
     /// Makes each application's windows contiguous without disturbing which

@@ -25,6 +25,10 @@ final class SwitcherController {
     private var localMouseMonitor: Any?
     private var watchdogTimer: Timer?
 
+    /// Keeps a stationary pointer from stealing the selection — see
+    /// `PointerActivityGate`.
+    private var pointer = PointerActivityGate()
+
     /// A visible panel with no interaction for this long is dismissed.
     ///
     /// The panel is borderless, non-activating and sits at `.screenSaver` level
@@ -92,7 +96,22 @@ final class SwitcherController {
             viewModel: viewModel,
             preferences: preferences,
             onActivate: { [weak self] window in self?.activate(window) },
-            onHover: { [weak self] index in self?.viewModel.select(at: index) },
+            onHover: { [weak self] index in
+                guard let self else { return }
+                // The panel opens under the pointer, so the row beneath it
+                // hovers immediately. Only a real movement counts.
+                guard self.pointer.shouldAcceptHover(at: NSEvent.mouseLocation) else { return }
+                self.viewModel.select(at: index)
+            },
+            onToggleFavourite: { [weak self] window in
+                guard let self else { return }
+                // Clicking the star is a deliberate act on that row, so select
+                // it first — otherwise the click would pin one window while the
+                // highlight, and therefore Return, still points at another.
+                self.viewModel.select(window: window)
+                self.viewModel.pin()
+                self.viewModel.toggleFavouriteOnSelection()
+            },
             onRequestPermissions: { [weak self] in
                 self?.dismiss()
                 self?.authorizer.openSystemSettings()
@@ -184,6 +203,12 @@ final class SwitcherController {
     func handle(_ command: SwitcherCommand) {
         // Any input proves the panel is still under the user's control.
         restartWatchdog()
+
+        // The keyboard takes precedence: re-suppress the pointer so a cursor
+        // resting over some other row cannot pull the selection back.
+        if command.movesSelection {
+            pointer.suppressHover(at: NSEvent.mouseLocation)
+        }
 
         switch command {
         case .invoke(let reverse):
@@ -280,6 +305,7 @@ final class SwitcherController {
         // keystroke; the async refresh lands a frame or two later if anything
         // changed.
         viewModel.beginSession(reverse: reverse)
+        pointer.suppressHover(at: NSEvent.mouseLocation)
 
         panel.beginSession(
             size: currentPanelSize(),

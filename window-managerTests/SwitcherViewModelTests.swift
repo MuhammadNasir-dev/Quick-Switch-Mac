@@ -567,8 +567,10 @@ struct SessionOrderTests {
         #expect(visited == Array(expected[1...]) + [expected[0]])
     }
 
-    @Test("Newly opened windows are appended, never inserted mid-list")
-    func newWindowsAppend() {
+    @Test("A window opening mid-session does not join the list")
+    func newWindowsDoNotAppearMidSession() {
+        // Every index has to keep meaning the same row for as long as the panel
+        // is up, or a keystroke lands somewhere the user was not aiming.
         let model = makeModel()
         model.beginSession(reverse: false)
         let opening = model.rows.map(\.window.id)
@@ -577,18 +579,61 @@ struct SessionOrderTests {
         updated.insert(WindowFixtures.make(id: 99, app: "Mail", title: "Inbox", pid: 50), at: 0)
         model.ingest(updated)
 
-        #expect(model.rows.map(\.window.id) == opening + [99])
+        #expect(model.rows.map(\.window.id) == opening)
     }
 
-    @Test("A closed window drops out without disturbing the rest")
-    func closedWindowsDropOut() {
+    @Test("A window vanishing mid-session does not renumber the rest")
+    func closedWindowsDoNotShiftIndices() {
+        // Accessibility drops and re-reports windows on other Spaces from one
+        // refresh to the next; letting that shift indices is what made walking
+        // a list jump backwards every few presses.
         let model = makeModel()
         model.beginSession(reverse: false)
         let opening = model.rows.map(\.window.id)
 
         model.ingest(WindowFixtures.browserAndEditor().filter { $0.id != 3 })
 
-        #expect(model.rows.map(\.window.id) == opening.filter { $0 != 3 })
+        #expect(model.rows.map(\.window.id) == opening)
+    }
+
+    @Test("Titles still update while the membership is frozen")
+    func contentsStayLive() throws {
+        let model = makeModel()
+        model.beginSession(reverse: false)
+
+        let renamed = WindowFixtures.browserAndEditor().map { window in
+            window.id == 2
+                ? WindowFixtures.make(id: 2, app: "Safari", title: "Renamed", pid: 10, zOrder: 1)
+                : window
+        }
+        model.ingest(renamed)
+
+        let row = try #require(model.rows.first { $0.window.id == 2 })
+        #expect(row.window.displayTitle == "Renamed")
+    }
+
+    @Test("Walking the list reaches every row exactly once, whatever the index does")
+    func walkingIsStableUnderChurn() {
+        // Reproduces the multi-Desktop report: refreshes that add and remove
+        // windows between every keypress.
+        let model = makeModel()
+        model.beginSession(reverse: false)
+        model.moveToEdge(first: true)
+        let total = model.rows.count
+
+        var visited: [CGWindowID] = [model.selectedWindow?.id].compactMap { $0 }
+        for step in 1..<total {
+            var churned = WindowFixtures.browserAndEditor()
+            churned.removeAll { $0.id == CGWindowID(step % 7) + 1 }
+            churned.append(WindowFixtures.make(id: CGWindowID(500 + step), app: "New", title: "N", pid: 90))
+            model.ingest(churned)
+
+            model.move(by: 1)
+            if let id = model.selectedWindow?.id { visited.append(id) }
+        }
+
+        #expect(visited.count == total)
+        #expect(Set(visited).count == total, "Every row visited exactly once")
     }
 
     @Test("The next session picks up the current order again")

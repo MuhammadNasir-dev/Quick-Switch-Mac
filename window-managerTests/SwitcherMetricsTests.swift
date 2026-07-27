@@ -833,3 +833,252 @@ struct OffSpaceGeometryTests {
         #expect(!CGRect(x: 0, y: 0, width: 900, height: 600).isEmpty)
     }
 }
+
+@MainActor
+@Suite("Pinning from the panel")
+struct FavouriteButtonTests {
+    private func makeModel() -> SwitcherViewModel {
+        let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)") ?? .standard
+        let preferences = Preferences(defaults: defaults)
+        preferences.showActiveAppWindowsFirst = false
+        let model = SwitcherViewModel(
+            preferences: preferences,
+            iconProvider: IconProvider(),
+            favourites: FavouritesStore(
+                defaults: UserDefaults(suiteName: "test.\(UUID().uuidString)") ?? .standard
+            ),
+            frontmostPID: { nil }
+        )
+        model.ingest(WindowFixtures.browserAndEditor())
+        model.beginSession(reverse: false)
+        return model
+    }
+
+    @Test("Selecting by window moves the highlight to that row")
+    func selectByWindow() throws {
+        // Clicking a star must move the selection first, or the click would pin
+        // one window while Return still activates another.
+        let model = makeModel()
+        let target = try #require(model.rows.last).window
+        model.select(window: target)
+        #expect(model.selectedWindow?.id == target.id)
+    }
+
+    @Test("Selecting a window that is no longer listed is ignored")
+    func selectMissingWindowIsSafe() {
+        let model = makeModel()
+        let before = model.selectedIndex
+        model.select(window: WindowFixtures.make(id: 9_999, app: "Ghost", title: "Gone", pid: 1))
+        #expect(model.selectedIndex == before)
+    }
+
+    @Test("Pinning through the star marks every window of that app")
+    func pinningAppliesToTheApplication() throws {
+        let model = makeModel()
+        let safari = try #require(model.rows.first { $0.window.appName == "Safari" }).window
+        model.select(window: safari)
+        model.toggleFavouriteOnSelection()
+
+        let safariRows = model.rows.filter { $0.window.appName == "Safari" }
+        let starred = safariRows.filter(\.isFavourite).count
+        #expect(safariRows.count == 3)
+        #expect(starred == 3, "All three Safari windows show the star")
+    }
+
+    @Test("Clicking the star twice returns to the starting state")
+    func pinningIsReversible() throws {
+        let model = makeModel()
+        let target = try #require(model.rows.first).window
+        model.select(window: target)
+        model.toggleFavouriteOnSelection()
+        #expect(model.rows[0].isFavourite)
+        model.toggleFavouriteOnSelection()
+        #expect(!model.rows[0].isFavourite)
+    }
+}
+
+@Suite("Scroll targeting")
+struct ScrollTargetTests {
+    private func target(
+        from previous: Int,
+        to selection: Int,
+        total: Int = 40,
+        visible: Int = 9
+    ) -> SwitcherMetrics.ScrollTarget {
+        SwitcherMetrics.scrollTarget(
+            from: previous, to: selection, totalItems: total, visibleItemCount: visible
+        )
+    }
+
+    @Test("The first row always pins to the top")
+    func firstRowPinsTop() {
+        // Otherwise the top row sits half-cut behind the container's padding.
+        #expect(target(from: 1, to: 0) == .top)
+        #expect(target(from: 39, to: 0) == .top)
+    }
+
+    @Test("The last row always pins to the bottom")
+    func lastRowPinsBottom() {
+        #expect(target(from: 38, to: 39) == .bottom)
+        #expect(target(from: 0, to: 39) == .bottom)
+    }
+
+    @Test("A single step scrolls minimally, so the list stays still")
+    func singleStepsAreMinimal() {
+        for selection in 2..<38 {
+            #expect(target(from: selection - 1, to: selection) == .minimal)
+            #expect(target(from: selection + 1, to: selection) == .minimal)
+        }
+    }
+
+    @Test("Wrapping backwards past a page anchors to the top")
+    func backwardJumpAnchorsTop() {
+        // `minimal` cannot be trusted across a jump: the destination row is not
+        // realised in a LazyVStack, so SwiftUI may not scroll at all.
+        #expect(target(from: 30, to: 5) == .top)
+    }
+
+    @Test("Jumping forward past a page anchors to the bottom")
+    func forwardJumpAnchorsBottom() {
+        #expect(target(from: 5, to: 30) == .bottom)
+    }
+
+    @Test("Page moves inside one screenful stay minimal")
+    func pageSizedMovesAreMinimal() {
+        // Exactly one page is a step, not a jump.
+        #expect(target(from: 10, to: 19) == .minimal)
+        #expect(target(from: 19, to: 10) == .minimal)
+    }
+
+    @Test("The decision never depends on a remembered scroll offset")
+    func decisionIsStateless() {
+        // Regression: tracking the believed top row meant that once the belief
+        // drifted — a mouse wheel, or SwiftUI resetting the offset when rows
+        // changed — every later move concluded "already visible" and the
+        // highlight stayed off screen. The same move must always decide the
+        // same way.
+        let first = target(from: 20, to: 21)
+        for _ in 0..<10 {
+            #expect(target(from: 20, to: 21) == first)
+        }
+    }
+
+    @Test("A one-item list is handled without contradiction")
+    func singleItemList() {
+        // Index 0 is both the first and the last row; first-match wins.
+        #expect(target(from: 0, to: 0, total: 1) == .top)
+    }
+
+    @Test("Staying on the same row still resolves to a target")
+    func staticSelectionResolves() {
+        // Layout changes re-issue the scroll with previous == index.
+        #expect(target(from: 20, to: 20) == .minimal)
+    }
+}
+
+@MainActor
+@Suite("Panel legibility")
+struct PanelAppearanceTests {
+    @Test("The panel material is not the always-dark HUD material")
+    func materialAdaptsToAppearance() {
+        // `.hudWindow` hands its descendants a dark *vibrant* appearance, so
+        // SwiftUI resolves `.primary` to white — while the material itself is
+        // translucent over whatever is behind the panel. On a light desktop
+        // that is white text on a light background.
+        let background = VisualEffectBackground()
+        #expect(background.material != .hudWindow)
+        #expect(background.material == .popover)
+    }
+
+    @Test("The panel blends with what is behind it")
+    func blendsBehindWindow() {
+        // `.behindWindow` is what makes the panel read as a floating overlay
+        // rather than an opaque slab.
+        #expect(VisualEffectBackground().blendingMode == .behindWindow)
+    }
+}
+
+@Suite("Pointer versus keyboard")
+struct PointerActivityGateTests {
+    @Test("A stationary pointer cannot steal the selection")
+    func stationaryPointerIsIgnored() {
+        // The panel opens under the cursor and SwiftUI hovers the row beneath
+        // it straight away, even though the mouse never moved. Acting on that
+        // is what made the switcher start on whatever the pointer rested over.
+        var gate = PointerActivityGate()
+        let resting = CGPoint(x: 400, y: 300)
+        gate.suppressHover(at: resting)
+
+        let first = gate.shouldAcceptHover(at: resting)
+        let second = gate.shouldAcceptHover(at: resting)
+        #expect(first == false)
+        #expect(second == false, "Repeated hovers stay ignored")
+    }
+
+    @Test("Sub-pixel jitter does not count as movement")
+    func jitterIsIgnored() {
+        // A mouse resting on a desk reports tiny movements; exact equality
+        // would let them through immediately.
+        var gate = PointerActivityGate()
+        gate.suppressHover(at: CGPoint(x: 400, y: 300))
+        let accepted = gate.shouldAcceptHover(at: CGPoint(x: 401, y: 301))
+        #expect(accepted == false)
+    }
+
+    @Test("A real movement hands control back to the mouse")
+    func realMovementIsAccepted() {
+        var gate = PointerActivityGate()
+        gate.suppressHover(at: CGPoint(x: 400, y: 300))
+        let accepted = gate.shouldAcceptHover(at: CGPoint(x: 400, y: 340))
+        #expect(accepted)
+        #expect(!gate.isSuppressed)
+    }
+
+    @Test("Once released, later hovers are accepted without re-measuring")
+    func staysReleased() {
+        var gate = PointerActivityGate()
+        gate.suppressHover(at: CGPoint(x: 400, y: 300))
+        _ = gate.shouldAcceptHover(at: CGPoint(x: 400, y: 340))
+        // Back near the original spot: still a mouse user, still accepted.
+        let accepted = gate.shouldAcceptHover(at: CGPoint(x: 400, y: 300))
+        #expect(accepted)
+    }
+
+    @Test("A fresh gate accepts hover, so the mouse works before any suppression")
+    func defaultAcceptsHover() {
+        var gate = PointerActivityGate()
+        let accepted = gate.shouldAcceptHover(at: CGPoint(x: 10, y: 10))
+        #expect(accepted)
+    }
+
+    @Test("Returning to the keyboard re-suppresses the pointer")
+    func keyboardReasserts() {
+        // Otherwise a cursor left over another row would drag the selection
+        // back on the next hover event.
+        var gate = PointerActivityGate()
+        gate.suppressHover(at: CGPoint(x: 400, y: 300))
+        _ = gate.shouldAcceptHover(at: CGPoint(x: 400, y: 400))
+
+        gate.suppressHover(at: CGPoint(x: 400, y: 400))
+        let accepted = gate.shouldAcceptHover(at: CGPoint(x: 400, y: 400))
+        #expect(gate.isSuppressed)
+        #expect(accepted == false)
+    }
+
+    @Test("Only selection-moving commands re-assert the keyboard")
+    func commandClassification() {
+        #expect(SwitcherCommand.move(1).movesSelection)
+        #expect(SwitcherCommand.moveVertical(1).movesSelection)
+        #expect(SwitcherCommand.invoke(reverse: false).movesSelection)
+        #expect(SwitcherCommand.insertText("a").movesSelection)
+        #expect(SwitcherCommand.selectIndex(3).movesSelection)
+
+        // These leave the highlight alone, so the pointer keeps whatever
+        // control it had.
+        #expect(!SwitcherCommand.confirm.movesSelection)
+        #expect(!SwitcherCommand.cancel.movesSelection)
+        #expect(!SwitcherCommand.toggleLayout.movesSelection)
+        #expect(!SwitcherCommand.toggleFavourite.movesSelection)
+        #expect(!SwitcherCommand.modifierReleased.movesSelection)
+    }
+}

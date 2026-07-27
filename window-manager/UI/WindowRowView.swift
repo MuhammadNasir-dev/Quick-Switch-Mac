@@ -43,6 +43,37 @@ enum WindowPresentation {
     }
 }
 
+/// The pin control shown on each row and card.
+///
+/// A `Button` rather than a bare `Image` with a tap gesture: the panel never
+/// becomes key, so the star has to work purely from mouse tracking, and a button
+/// gets the hit-testing, pressed state and VoiceOver role for free. `.plain`
+/// keeps it from drawing a bezel over the row.
+///
+/// It is visible whenever the window is pinned, and appears in outline form on
+/// the highlighted row — showing an empty star on all forty rows at once would
+/// be visual noise, and the highlighted row is the one ⌘D would act on anyway.
+struct FavouriteButton: View {
+    let isFavourite: Bool
+    let isSelected: Bool
+    let size: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        if isFavourite || isSelected {
+            Button(action: action) {
+                Image(systemName: isFavourite ? "star.fill" : "star")
+                    .font(.system(size: size))
+                    .foregroundStyle(isFavourite ? AnyShapeStyle(.yellow) : AnyShapeStyle(.tertiary))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isFavourite ? "Unpin this app" : "Pin this app to the top")
+            .accessibilityLabel(isFavourite ? "Unpin app" : "Pin app")
+        }
+    }
+}
+
 /// A window as a dense, left-to-right list row.
 ///
 /// Used by both `.list` and `.grouped`; in the latter the application name is
@@ -56,6 +87,7 @@ struct WindowRowView: View {
     let ordinal: Int
     var showsAppName: Bool = true
     var isIndented: Bool = false
+    var onToggleFavourite: () -> Void = {}
 
     private var window: AppWindow { row.window }
 
@@ -87,12 +119,12 @@ struct WindowRowView: View {
 
             Spacer(minLength: 8)
 
-            if row.isFavourite {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.yellow)
-                    .accessibilityHidden(true)
-            }
+            FavouriteButton(
+                isFavourite: row.isFavourite,
+                isSelected: isSelected,
+                size: 11,
+                action: onToggleFavourite
+            )
 
             if let badge = WindowPresentation.badge(for: window) {
                 BadgeView(badge: badge, compact: false)
@@ -165,6 +197,7 @@ struct WindowCardView: View {
     let icon: NSImage
     let isSelected: Bool
     let ordinal: Int
+    var onToggleFavourite: () -> Void = {}
 
     private var window: AppWindow { row.window }
 
@@ -185,12 +218,13 @@ struct WindowCardView: View {
             }
             .frame(height: 48)
             .overlay(alignment: .topLeading) {
-                if row.isFavourite {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.yellow)
-                        .accessibilityHidden(true)
-                }
+                FavouriteButton(
+                    isFavourite: row.isFavourite,
+                    isSelected: isSelected,
+                    size: 10,
+                    action: onToggleFavourite
+                )
+                .padding(.leading, 4)
             }
 
             VStack(spacing: 1) {
@@ -217,7 +251,8 @@ struct WindowCardView: View {
         .frame(height: SwitcherLayout.grid.itemHeight)
         .frame(maxWidth: .infinity)
         .background(SelectionBackground(isSelected: isSelected))
-        .overlay(alignment: .topLeading) {
+        // Opposite corner from the pin, which owns the top-leading slot.
+        .overlay(alignment: .topTrailing) {
             if ordinal <= 9, isSelected {
                 KeyCapView(text: "⌘\(ordinal)")
                     .padding(5)

@@ -16,19 +16,10 @@ struct SwitcherView: View {
 
     var onActivate: (AppWindow) -> Void
     var onHover: (Int) -> Void
+    var onToggleFavourite: (AppWindow) -> Void
     var onRequestPermissions: () -> Void
 
     private var layout: SwitcherLayout { preferences.layout }
-
-    /// Index of the row currently pinned to the top of the scroll area.
-    ///
-    /// The scroll position is tracked explicitly rather than delegating to
-    /// `scrollTo`'s built-in heuristics. Anchoring to `.center` drags the list
-    /// under a stationary highlight; passing no anchor leaves the behaviour up
-    /// to SwiftUI, which cannot compute a minimal scroll for rows a `LazyVStack`
-    /// has not realised yet. Knowing the first visible row makes it exact: only
-    /// scroll when the selection crosses an edge, and by exactly one row.
-    @State private var firstVisibleIndex = 0
 
     /// How many items fit without scrolling, in the current layout.
     private var visibleItemCount: Int {
@@ -141,28 +132,31 @@ struct SwitcherView: View {
                     maximumVisibleRows: preferences.maximumVisibleRows
                 )
             )
-            .onChange(of: viewModel.selectedIndex) { _, newValue in
-                scroll(proxy, to: newValue)
+            .onChange(of: viewModel.selectedIndex) { oldValue, newValue in
+                scroll(proxy, from: oldValue, to: newValue)
             }
             .onChange(of: preferences.layout) { _, _ in
-                // Column count changed, so the previous anchor is meaningless.
-                firstVisibleIndex = 0
-                scroll(proxy, to: viewModel.selectedIndex, animated: false)
+                scroll(proxy, from: viewModel.selectedIndex, to: viewModel.selectedIndex)
             }
             .onChange(of: viewModel.sessionToken) { _, _ in
-                firstVisibleIndex = 0
-                scroll(proxy, to: viewModel.selectedIndex, animated: false)
+                scroll(proxy, from: viewModel.selectedIndex, to: viewModel.selectedIndex)
             }
             .onChange(of: viewModel.query) { _, _ in
-                // Filtering rebuilds the list from the top.
-                firstVisibleIndex = 0
-                scroll(proxy, to: viewModel.selectedIndex, animated: false)
+                // Filtering rebuilds the list, so the offset means nothing now.
+                scroll(proxy, from: 0, to: viewModel.selectedIndex)
             }
         }
     }
 
+    /// A plain `VStack`, not `LazyVStack`.
+    ///
+    /// Laziness is what made `scrollTo` unreliable: a row outside the viewport
+    /// has no geometry, so SwiftUI cannot compute a scroll to it and sometimes
+    /// does nothing at all — the selection then walks off screen while arrowing.
+    /// These rows are an icon and two labels over a cached image, so realising
+    /// every one of them costs little, and it makes scrolling exact.
     private var listBody: some View {
-        LazyVStack(spacing: layout.itemSpacing) {
+        VStack(spacing: layout.itemSpacing) {
             ForEach(Array(viewModel.rows.enumerated()), id: \.element.id) { index, row in
                 if layout.showsGroupHeaders, row.startsGroup {
                     GroupHeaderView(
@@ -179,7 +173,8 @@ struct SwitcherView: View {
                     // The header already names the app, so the row doesn't
                     // repeat it — that is the whole point of grouping.
                     showsAppName: !layout.showsGroupHeaders,
-                    isIndented: layout.showsGroupHeaders
+                    isIndented: layout.showsGroupHeaders,
+                    onToggleFavourite: { onToggleFavourite(row.window) }
                 )
                 .id(row.id)
                 .onTapGesture { onActivate(row.window) }
@@ -190,6 +185,12 @@ struct SwitcherView: View {
         .padding(.vertical, SwitcherMetrics.contentPadding)
     }
 
+    /// Still lazy, unlike `listBody`.
+    ///
+    /// `Grid` is a different container with a different API, and the grid packs
+    /// five items per visual row — so it holds a whole screenful in a fraction
+    /// of the rows, and the unrealised-geometry problem that broke list
+    /// scrolling is far less reachable here.
     private var gridBody: some View {
         LazyVGrid(
             columns: Array(
@@ -203,7 +204,8 @@ struct SwitcherView: View {
                     row: row,
                     icon: viewModel.iconProvider.icon(for: row.window),
                     isSelected: index == viewModel.selectedIndex,
-                    ordinal: index + 1
+                    ordinal: index + 1,
+                    onToggleFavourite: { onToggleFavourite(row.window) }
                 )
                 .id(row.id)
                 .onTapGesture { onActivate(row.window) }
@@ -214,43 +216,33 @@ struct SwitcherView: View {
         .padding(.vertical, SwitcherMetrics.contentPadding)
     }
 
-    /// Keeps the selection visible, scrolling only when it crosses an edge.
+    /// Keeps the selection on screen.
     ///
-    /// The scroll target is always the row that should sit at the *top* of the
-    /// viewport, anchored to `.top` — a fully determined position, so the list
-    /// cannot drift. While the selection is already on screen nothing moves at
-    /// all, which is what makes arrowing through a list feel steady.
-    private func scroll(_ proxy: ScrollViewProxy, to index: Int, animated: Bool = true) {
+    /// The decision is pure arithmetic in `SwitcherMetrics.scrollTarget`, so
+    /// the awkward cases are covered by tests rather than by eye; this only
+    /// turns the answer into a `scrollTo`.
+    private func scroll(_ proxy: ScrollViewProxy, from previous: Int, to index: Int) {
         let rows = viewModel.rows
         guard rows.indices.contains(index) else { return }
 
-        let visible = visibleItemCount
-        guard rows.count > visible else {
-            // Everything fits; there is nothing to scroll.
-            if firstVisibleIndex != 0 { firstVisibleIndex = 0 }
-            return
-        }
+        let target = SwitcherMetrics.scrollTarget(
+            from: previous,
+            to: index,
+            totalItems: rows.count,
+            visibleItemCount: visibleItemCount
+        )
+        let id = rows[index].id
 
-        var first = firstVisibleIndex
-        if index < first {
-            first = index
-        } else if index >= first + visible {
-            first = index - visible + 1
-        } else {
-            return // already visible
-        }
-        first = min(max(0, first), rows.count - visible)
-        guard first != firstVisibleIndex else { return }
-
-        firstVisibleIndex = first
-        // Align to a row boundary in the grid so cards never sit half-scrolled.
-        let aligned = first - (first % max(1, layout.columnCount))
-        let target = rows[min(aligned, rows.count - 1)].id
-
-        if animated {
-            withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(target, anchor: .top) }
-        } else {
-            proxy.scrollTo(target, anchor: .top)
+        switch target {
+        case .minimal:
+            // A single step: the neighbouring row is already realised, so
+            // SwiftUI can compute the minimal scroll and the list stays still
+            // while the selection is comfortably inside the viewport.
+            withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(id) }
+        case .top:
+            withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(id, anchor: .top) }
+        case .bottom:
+            withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(id, anchor: .bottom) }
         }
     }
 

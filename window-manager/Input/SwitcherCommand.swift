@@ -36,3 +36,19 @@ nonisolated enum SwitcherCommand: Equatable, Sendable {
     /// The summoning modifier was released.
     case modifierReleased
 }
+
+extension SwitcherCommand {
+    /// Whether this command moves the highlight by keyboard.
+    ///
+    /// Used to re-assert keyboard control over a stationary pointer; commands
+    /// that only dismiss or reconfigure the panel leave the pointer alone.
+    var movesSelection: Bool {
+        switch self {
+        case .invoke, .move, .moveVertical, .moveToEdge, .selectIndex,
+             .insertText, .deleteBackward, .clearQuery:
+            true
+        case .confirm, .cancel, .toggleLayout, .toggleFavourite, .modifierReleased:
+            false
+        }
+    }
+}

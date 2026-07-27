@@ -32,7 +32,7 @@ struct SettingsView: View {
 
     /// Panes, in sidebar order.
     private enum Pane: String, CaseIterable, Identifiable {
-        case general, shortcut, appearance, windows, favourites
+        case general, shortcut, appearance, windows, favourites, about
 
         var id: String { rawValue }
 
@@ -43,6 +43,7 @@ struct SettingsView: View {
             case .appearance: "Appearance"
             case .windows: "Windows"
             case .favourites: "Favourites"
+            case .about: "About"
             }
         }
 
@@ -53,6 +54,7 @@ struct SettingsView: View {
             case .appearance: "paintbrush"
             case .windows: "macwindow"
             case .favourites: "star"
+            case .about: "info.circle"
             }
         }
     }
@@ -87,6 +89,7 @@ struct SettingsView: View {
         case .appearance: appearance
         case .windows: windows
         case .favourites: favouritesTab
+        case .about: aboutPane
         }
     }
 
@@ -256,6 +259,17 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var aboutPane: some View {
+        // Not a `Form`: the About block is centred display copy, and grouped
+        // form insets would box it in for no benefit. The scroll view keeps it
+        // reachable if the window is dragged very short.
+        ScrollView {
+            AboutContent()
+                .padding(.horizontal, 28)
+                .padding(.vertical, 32)
+        }
     }
 
     // MARK: - Building blocks
