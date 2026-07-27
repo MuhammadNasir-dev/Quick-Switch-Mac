@@ -782,4 +782,54 @@ struct SettingsSizingTests {
         #expect(SettingsView.Metrics.idealHeight < usableHeight)
         #expect(SettingsView.Metrics.idealWidth < 1280)
     }
+
+    @Test("The sidebar leaves the detail pane the majority of the width")
+    func sidebarIsNotOverbearing() {
+        let detail = SettingsView.Metrics.minimumWidth - SettingsView.Metrics.sidebarWidth
+        #expect(detail > SettingsView.Metrics.sidebarWidth * 2)
+    }
+}
+
+@Suite("Off-Space window geometry")
+struct OffSpaceGeometryTests {
+    private let filter = WindowFilter(ownPID: 999)
+    private let standard = kAXStandardWindowSubrole as String
+
+    @Test("A window with no reported geometry is kept, not dropped")
+    func unknownGeometryIsKept() {
+        // Regression: the size rule ran on the Accessibility frame before the
+        // CoreGraphics bounds were resolved. A window on another Space is not
+        // composited, so Accessibility reports a zero frame for it — and a
+        // 48pt minimum it can never satisfy silently removed every window on
+        // Desktop 2.
+        #expect(filter.allowsAXWindow(subrole: standard, title: "Elsewhere", isMinimized: false, frame: nil))
+        #expect(filter.allowsAXWindow(subrole: standard, title: "Elsewhere", isMinimized: false, frame: .zero))
+        #expect(filter.allowsAXWindow(
+            subrole: standard, title: "Elsewhere", isMinimized: false,
+            frame: CGRect(x: 100, y: 100, width: 0, height: 0)
+        ))
+    }
+
+    @Test("Known-but-tiny geometry is still rejected")
+    func realGeometryStillFilters() {
+        // The rule must keep working when the frame is genuinely known, or
+        // decorations and drag proxies come back.
+        #expect(!filter.allowsAXWindow(
+            subrole: standard, title: "Proxy", isMinimized: false,
+            frame: CGRect(x: 0, y: 0, width: 10, height: 10)
+        ))
+        #expect(filter.allowsAXWindow(
+            subrole: standard, title: "Real", isMinimized: false,
+            frame: CGRect(x: 0, y: 0, width: 900, height: 600)
+        ))
+    }
+
+    @Test("An empty frame is treated as unknown rather than as zero-sized")
+    func emptinessIsTheDistinction() {
+        // `CGRect.isEmpty` is true for any rect with a zero dimension, which is
+        // exactly the shape Accessibility hands back for an uncomposited window.
+        #expect(CGRect.zero.isEmpty)
+        #expect(CGRect(x: 10, y: 10, width: 0, height: 500).isEmpty)
+        #expect(!CGRect(x: 0, y: 0, width: 900, height: 600).isEmpty)
+    }
 }

@@ -1,15 +1,18 @@
 import Combine
 import SwiftUI
 
-/// Settings, split across tabs.
+/// Settings, as a sidebar and a detail pane.
 ///
-/// A single scrolling `Form` sized itself to its content — `.fixedSize(vertical:)`
-/// on a stack of six sections produced a window taller than the screen, so the
-/// bottom sat behind the Dock with no way to reach it and no resize handle to
-/// fix it with. Tabs are also what macOS settings windows conventionally look
-/// like, so this is the idiomatic answer rather than a workaround: each pane is
-/// short enough to read at a glance, and the window stays a predictable size no
-/// matter how many favourites are pinned.
+/// Two earlier shapes did not work. A single scrolling `Form` sized itself to
+/// its content, producing a window taller than the screen with its bottom behind
+/// the Dock and no resize handle to recover. A `TabView` fixed the height but
+/// stacks a tab strip on top of grouped-form insets, which reads as chrome piled
+/// on chrome in a window this small.
+///
+/// A sidebar is what current macOS settings look like, and it earns its space:
+/// every pane is reachable in one click, the detail side scrolls independently,
+/// and the window has an obvious minimum size that is nowhere near the height of
+/// a display.
 struct SettingsView: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var authorizer: AccessibilityAuthorizer
@@ -20,24 +23,52 @@ struct SettingsView: View {
     /// whose content outgrows the height scrolls instead of pushing the window
     /// off screen.
     enum Metrics {
-        static let minimumWidth: CGFloat = 500
-        static let idealWidth: CGFloat = 540
-        static let minimumHeight: CGFloat = 340
-        static let idealHeight: CGFloat = 430
+        static let sidebarWidth: CGFloat = 176
+        static let minimumWidth: CGFloat = 620
+        static let idealWidth: CGFloat = 660
+        static let minimumHeight: CGFloat = 380
+        static let idealHeight: CGFloat = 460
     }
 
+    /// Panes, in sidebar order.
+    private enum Pane: String, CaseIterable, Identifiable {
+        case general, shortcut, appearance, windows, favourites
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .general: "General"
+            case .shortcut: "Shortcut"
+            case .appearance: "Appearance"
+            case .windows: "Windows"
+            case .favourites: "Favourites"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .general: "gearshape"
+            case .shortcut: "keyboard"
+            case .appearance: "paintbrush"
+            case .windows: "macwindow"
+            case .favourites: "star"
+            }
+        }
+    }
+
+    @State private var selection: Pane = .general
+
     var body: some View {
-        TabView {
-            general
-                .tabItem { Label("General", systemImage: "gearshape") }
-            shortcut
-                .tabItem { Label("Shortcut", systemImage: "keyboard") }
-            appearance
-                .tabItem { Label("Appearance", systemImage: "paintbrush") }
-            windows
-                .tabItem { Label("Windows", systemImage: "macwindow") }
-            favouritesTab
-                .tabItem { Label("Favourites", systemImage: "star") }
+        NavigationSplitView {
+            List(Pane.allCases, selection: $selection) { pane in
+                Label(pane.title, systemImage: pane.symbol)
+                    .tag(pane)
+            }
+            .navigationSplitViewColumnWidth(Metrics.sidebarWidth)
+        } detail: {
+            detail
+                .navigationTitle(selection.title)
         }
         .frame(
             minWidth: Metrics.minimumWidth,
@@ -46,6 +77,17 @@ struct SettingsView: View {
             idealHeight: Metrics.idealHeight
         )
         .onAppear { launchAtLogin.refresh() }
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        switch selection {
+        case .general: general
+        case .shortcut: shortcut
+        case .appearance: appearance
+        case .windows: windows
+        case .favourites: favouritesTab
+        }
     }
 
     // MARK: - Panes

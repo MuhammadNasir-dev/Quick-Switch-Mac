@@ -210,17 +210,10 @@ nonisolated struct WindowEnumerator: Sendable {
             let subrole = AX.string(axWindow, kAXSubroleAttribute as String)
             let title = AX.string(axWindow, kAXTitleAttribute as String) ?? ""
             let isMinimized = AX.bool(axWindow, kAXMinimizedAttribute as String) ?? false
-            let frame = AX.frame(axWindow)
-
-            guard filter.allowsAXWindow(
-                subrole: subrole,
-                title: title,
-                isMinimized: isMinimized,
-                frame: frame
-            ) else { continue }
+            let axFrame = AX.frame(axWindow)
 
             let windowID = AXPrivateAPI.windowID(of: axWindow)
-                ?? correlateWindowID(frame: frame, pid: pid, cgWindows: cgWindows)
+                ?? correlateWindowID(frame: axFrame, pid: pid, cgWindows: cgWindows)
 
             guard let windowID else {
                 // Without a window number there is no way to de-duplicate or
@@ -230,6 +223,23 @@ nonisolated struct WindowEnumerator: Sendable {
             }
 
             let metadata = cgWindows[windowID]
+
+            // Identity is resolved *before* filtering so the size rule can fall
+            // back to the CoreGraphics bounds.
+            //
+            // A window on another Space is not composited, and Accessibility
+            // frequently reports a zero or stale frame for it. Filtering on the
+            // Accessibility frame alone therefore threw away every window on
+            // Desktop 2 for failing a minimum-size check it could never pass —
+            // CoreGraphics knows the real bounds all along.
+            let frame = (axFrame?.isEmpty == false) ? axFrame : metadata?.bounds
+
+            guard filter.allowsAXWindow(
+                subrole: subrole,
+                title: title,
+                isMinimized: isMinimized,
+                frame: frame
+            ) else { continue }
 
             // Structural rejection using CoreGraphics facts the AX API cannot
             // provide: menu-bar-layer surfaces and fully transparent helpers.
@@ -257,7 +267,7 @@ nonisolated struct WindowEnumerator: Sendable {
                     // A minimised window is on no Space; treat it as reachable.
                     isOnActiveSpace: isMinimized ? true : (metadata?.isOnActiveSpace ?? false),
                     isAppFocusedWindow: isFocused,
-                    frame: frame ?? metadata?.bounds ?? .zero,
+                    frame: frame ?? .zero,
                     zOrder: metadata?.zOrder ?? Int.max,
                     bundleURL: bundleURL
                 )

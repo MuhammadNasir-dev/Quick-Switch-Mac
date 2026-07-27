@@ -126,7 +126,13 @@ nonisolated struct WindowFilter: Sendable {
 
         if isMinimized { return true }
 
-        guard let frame else { return true }
+        // No geometry, or degenerate geometry, means "not known" rather than
+        // "too small". Accessibility reports a zero frame for windows it is not
+        // currently compositing — anything on another Space — and rejecting
+        // those would hide every window that is not on the Desktop in front of
+        // the user. CoreGraphics bounds are supplied by the caller when it has
+        // them, so an empty frame here genuinely means unknown.
+        guard let frame, !frame.isEmpty else { return true }
         guard frame.width >= Self.minimumSide, frame.height >= Self.minimumSide else { return false }
         return true
     }
