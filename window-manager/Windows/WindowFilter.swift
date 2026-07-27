@@ -69,9 +69,6 @@ nonisolated struct WindowFilter: Sendable {
     /// Windows at or below this alpha are invisible helper surfaces.
     static let minimumAlpha: CGFloat = 0.05
 
-    /// Minimum size for a window that Accessibility never described.
-    static let minimumCGOnlySide: CGFloat = 120
-
     let ownPID: pid_t
 
     init(ownPID: pid_t = ProcessInfo.processInfo.processIdentifier) {
@@ -104,18 +101,6 @@ nonisolated struct WindowFilter: Sendable {
         guard alpha > Self.minimumAlpha else { return false }
         guard bounds.width >= Self.minimumSide, bounds.height >= Self.minimumSide else { return false }
         return true
-    }
-
-    /// Whether a window found *only* through `CGWindowList` should be listed.
-    ///
-    /// Deliberately stricter than `allowsCGWindow`. Without an Accessibility
-    /// subrole there is no way to tell a document window from the menu-bar
-    /// strips, drag proxies and status surfaces that processes publish at layer
-    /// zero — a live system shows dozens of 1680x24 and 54x54 entries. A real
-    /// window is comfortably larger than either.
-    func allowsCGOnlyWindow(layer: Int, alpha: CGFloat, bounds: CGRect) -> Bool {
-        guard allowsCGWindow(layer: layer, alpha: alpha, bounds: bounds) else { return false }
-        return bounds.width >= Self.minimumCGOnlySide && bounds.height >= Self.minimumCGOnlySide
     }
 
     /// Whether an Accessibility window element should be listed.

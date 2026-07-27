@@ -25,10 +25,19 @@ import SwiftUI
 final class UtilityWindowController<Content: View>: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let title: String
+    private let isResizable: Bool
     private let content: () -> Content
 
-    init(title: String, @ViewBuilder content: @escaping () -> Content) {
+    /// - Parameter isResizable: content that can grow — a settings pane with a
+    ///   user-managed list, say — needs a resize handle. Fixed-size panels such
+    ///   as About do not, and look wrong with one.
+    init(
+        title: String,
+        isResizable: Bool = false,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
         self.title = title
+        self.isResizable = isResizable
         self.content = content
     }
 
@@ -49,15 +58,49 @@ final class UtilityWindowController<Content: View>: NSObject, NSWindowDelegate {
         let hosting = NSHostingController(rootView: content())
         let window = NSWindow(contentViewController: hosting)
         window.title = title
-        window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+        var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+        if isResizable { style.insert(.resizable) }
+        window.styleMask = style
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
         self.window = window
 
+        // A SwiftUI root that sizes itself to its content can ask for a window
+        // taller than the display, which puts the bottom of the pane behind the
+        // Dock where it cannot be reached — and without a resize handle there is
+        // no way out of that. Clamping to the visible frame makes that state
+        // unreachable however much content a pane grows.
+        constrainToScreen(window)
+
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Shrinks the window to the screen's usable area and re-centres it.
+    ///
+    /// `visibleFrame` already excludes the menu bar and the Dock, so fitting
+    /// inside it is exactly the guarantee needed.
+    private func constrainToScreen(_ window: NSWindow) {
+        guard let visible = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
+
+        var frame = window.frame
+        frame.size.width = min(frame.width, visible.width - 40)
+        frame.size.height = min(frame.height, visible.height - 40)
+        frame.origin.x = visible.midX - frame.width / 2
+        frame.origin.y = visible.midY - frame.height / 2
+
+        guard frame != window.frame else { return }
+        window.setFrame(frame, display: false)
+    }
+
+    /// Re-clamps when the display arrangement changes while the window is open;
+    /// unplugging a large external monitor is the usual way a window ends up
+    /// bigger than the screen it lands on.
+    func windowDidChangeScreen(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        constrainToScreen(window)
     }
 
     func close() {

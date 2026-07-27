@@ -42,6 +42,7 @@ applications.
 | <kbd>←</kbd> <kbd>→</kbd> <kbd>⇥</kbd> <kbd>⇧⇥</kbd> | Move one item |
 | <kbd>⌘</kbd><kbd>L</kbd> | Cycle List → Grouped → Grid without closing the panel |
 | <kbd>⌘</kbd><kbd>1</kbd>–<kbd>9</kbd> | Jump to a row and switch |
+| <kbd>⌘</kbd><kbd>D</kbd> | Pin or unpin the highlighted window's app |
 | <kbd>⏎</kbd> | Switch to the highlighted window |
 | <kbd>esc</kbd> | Cancel |
 | *type anything* | Fuzzy-filter by app name and window title |
@@ -76,6 +77,12 @@ far the switcher reaches. Turn either off to narrow it to the Desktop or monitor
 you are looking at. Minimised windows are exempt from both — a minimised window
 belongs to no Space and no display, so filtering it out would make it
 unreachable.
+
+**Favourites** pin an application to the top of the list. Press <kbd>⌘</kbd><kbd>D</kbd>
+while the switcher is open, or manage the list in Settings → Favourites. They are
+stored per *application*, not per window: a `CGWindowID` is reassigned whenever a
+window is closed and reopened and titles change constantly, so neither survives a
+restart — the bundle identifier does.
 
 **Show the active app's windows first** (on by default) groups every window of
 the app you are currently in at the top, then everything else in
@@ -231,10 +238,13 @@ elsewhere. Add these repository secrets to get signed, notarized builds:
   through Accessibility instead, so that permission is never requested.
 * **Accessibility under-reports windows on other Spaces.** `kAXWindowsAttribute`
   routinely omits an application's windows that sit on a Space other than the
-  active one. Those windows are recovered from `CGWindowList`, but without an
-  Accessibility element there is no title for them until their app is brought
-  forward — they appear under the application's own name, and activating one
-  resolves the real window once macOS exposes it.
+  active one, so a plain replace-the-list refresh makes everything on Desktop 2
+  vanish while you are on Desktop 1. `WindowIndex` therefore *retains* a window
+  that Accessibility stops describing for as long as `CGWindowList` still lists
+  it, keeping its title and element intact. Retention rather than invention is
+  deliberate: synthesising rows from the CoreGraphics list instead produces
+  duplicates, because one window routinely owns several layer-0 surfaces that no
+  public API distinguishes from real windows.
 * **Full-screen Spaces animate.** Activating a window in another full-screen
   Space triggers the system's ~0.5 s Space transition, which cannot be skipped.
 * **Sandboxing is off** — required, since a sandboxed process can neither

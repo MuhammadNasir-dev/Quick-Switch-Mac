@@ -537,6 +537,11 @@ private nonisolated final class TapState: @unchecked Sendable {
             break
         }
 
+        // ⌘D pins the selected application.
+        if keyCode == KeyCode.letterD, flags.contains(.maskCommand) {
+            return Decision(consume: true, command: .toggleFavourite)
+        }
+
         // ⌘L flips between list and grid in place.
         if keyCode == KeyCode.letterL, flags.contains(.maskCommand) {
             return Decision(consume: true, command: .toggleLayout)

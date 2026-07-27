@@ -31,6 +31,8 @@ nonisolated enum SwitcherCommand: Equatable, Sendable {
     case clearQuery
     /// Switch between the list and grid layouts without leaving the panel.
     case toggleLayout
+    /// Pin or unpin the selected window's application.
+    case toggleFavourite
     /// The summoning modifier was released.
     case modifierReleased
 }

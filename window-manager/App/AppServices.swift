@@ -23,6 +23,7 @@ final class AppServices: ObservableObject {
     let hotKeyMonitor: HotKeyMonitor
     let switcher: SwitcherController
     let launchAtLogin: LaunchAtLoginService
+    let favourites: FavouritesStore
 
     /// Set when the event tap has been abandoned; surfaced in the menu bar so
     /// a silently dead shortcut is never a mystery.
@@ -42,13 +43,16 @@ final class AppServices: ObservableObject {
         self.windowIndex = WindowIndex()
         self.hotKeyMonitor = HotKeyMonitor(modifier: preferences.modifier)
         self.launchAtLogin = LaunchAtLoginService()
+        let favourites = FavouritesStore()
+        self.favourites = favourites
 
         self.switcher = SwitcherController(
             preferences: preferences,
             windowIndex: windowIndex,
             authorizer: authorizer,
             hotKeyMonitor: hotKeyMonitor,
-            iconProvider: iconProvider
+            iconProvider: iconProvider,
+            favourites: favourites
         )
 
         hotKeyMonitor.onCommand = { [weak self] command in

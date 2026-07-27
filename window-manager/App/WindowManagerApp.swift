@@ -19,7 +19,8 @@ struct WindowManagerApp: App {
                 SettingsView(
                     preferences: services.preferences,
                     authorizer: services.authorizer,
-                    launchAtLogin: services.launchAtLogin
+                    launchAtLogin: services.launchAtLogin,
+                    favourites: services.favourites
                 )
             } else {
                 // Only reachable if the scene body runs before
@@ -62,11 +63,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
             self.onboarding = onboarding
 
-            let settings = UtilityWindowController(title: "QuickSwitch Settings") {
+            let settings = UtilityWindowController(title: "QuickSwitch Settings", isResizable: true) {
                 SettingsView(
                     preferences: services.preferences,
                     authorizer: services.authorizer,
-                    launchAtLogin: services.launchAtLogin
+                    launchAtLogin: services.launchAtLogin,
+                    favourites: services.favourites
                 )
             }
             self.settings = settings

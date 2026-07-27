@@ -509,130 +509,277 @@ struct MenuHeaderViewTests {
     }
 }
 
-@Suite("Cross-Space and cross-display windows")
-struct MultiSpaceTests {
-    private let filter = WindowFilter(ownPID: 999)
-
-    @Test("CoreGraphics-only windows are held to a stricter size rule")
-    func cgOnlyWindowsAreStricter() {
-        // A live system publishes dozens of layer-0 surfaces that are not
-        // windows: menu-bar strips at 1680x24, 54x54 helpers, 0x0 placeholders.
-        // Without a subrole to inspect, size is the only thing separating them
-        // from a real window on another Space.
-        let junk = [
-            CGRect(x: 0, y: 0, width: 1680, height: 24),   // menu-bar strip
-            CGRect(x: 0, y: 0, width: 54, height: 54),     // helper surface
-            CGRect(x: 0, y: 0, width: 0, height: 0),       // placeholder
-            CGRect(x: 0, y: 0, width: 188, height: 35)     // auth prompt strip
-        ]
-        for bounds in junk {
-            #expect(!filter.allowsCGOnlyWindow(layer: 0, alpha: 1, bounds: bounds),
-                    "\(bounds.size) should not be listed")
-        }
-
-        let real = [
-            CGRect(x: 0, y: 0, width: 1009, height: 656),
-            CGRect(x: 0, y: 0, width: 500, height: 500)
-        ]
-        for bounds in real {
-            #expect(filter.allowsCGOnlyWindow(layer: 0, alpha: 1, bounds: bounds))
-        }
+@MainActor
+@Suite("Favourites")
+struct FavouritesTests {
+    private func makeStore() -> FavouritesStore {
+        FavouritesStore(defaults: UserDefaults(suiteName: "test.\(UUID().uuidString)") ?? .standard)
     }
 
-    @Test("The stricter rule never admits what the normal rule rejects")
-    func cgOnlyIsASubset() {
-        let cases: [(Int, CGFloat, CGRect)] = [
-            (24, 1, CGRect(x: 0, y: 0, width: 400, height: 400)),   // menu-bar layer
-            (0, 0, CGRect(x: 0, y: 0, width: 400, height: 400)),    // transparent
-            (0, 1, CGRect(x: 0, y: 0, width: 10, height: 10))       // tiny
-        ]
-        for (layer, alpha, bounds) in cases {
-            if filter.allowsCGOnlyWindow(layer: layer, alpha: alpha, bounds: bounds) {
-                #expect(filter.allowsCGWindow(layer: layer, alpha: alpha, bounds: bounds))
-            }
-        }
+    private func window(_ id: CGWindowID, app: String, pid: pid_t) -> AppWindow {
+        WindowFixtures.make(id: id, app: app, title: "Window \(id)", pid: pid)
     }
 
-    @Test("Off-Space windows are not rejected for being transparent")
-    func offSpaceWindowsKeepTheirAlpha() {
-        // Measured on a live system: windows on another Space report alpha 1.0,
-        // so the alpha rule must not be what hides them.
-        #expect(filter.allowsCGWindow(
-            layer: 0, alpha: 1, bounds: CGRect(x: 0, y: 0, width: 1009, height: 656)
-        ))
+    @Test("Toggling adds, then removes")
+    func toggleRoundTrip() {
+        let store = makeStore()
+        let safari = window(1, app: "Safari", pid: 10)
+        #expect(!store.contains(safari))
+        #expect(store.toggle(safari))
+        #expect(store.contains(safari))
+        #expect(!store.toggle(safari))
+        #expect(!store.contains(safari))
     }
 
-    @Test("Display lookup ignores empty frames")
-    func displayLookupIgnoresEmptyFrames() {
-        #expect(WindowEnumerator.displayID(containing: .zero) == nil)
+    @Test("Favourites are keyed by app, so every window of it is pinned")
+    func favouritesArePerApplication() {
+        // A CGWindowID is reassigned when a window is closed and reopened, and
+        // titles change constantly — neither survives a restart, so the bundle
+        // identifier is the only durable anchor.
+        let store = makeStore()
+        store.toggle(window(1, app: "Safari", pid: 10))
+        #expect(store.contains(window(2, app: "Safari", pid: 10)),
+                "A second Safari window inherits the favourite")
+        #expect(store.contains(window(3, app: "Safari", pid: 99)),
+                "Even after Safari is relaunched with a new pid")
     }
 
-    @Test("A window is attributed to the display it mostly covers")
-    func displayLookupPicksLargestOverlap() {
-        // Against the real display list: a frame covering the main display must
-        // resolve to a display, and one far outside every display must not.
-        let main = CGDisplayBounds(CGMainDisplayID())
-        #expect(WindowEnumerator.displayID(containing: main.insetBy(dx: 10, dy: 10)) != nil)
-        #expect(WindowEnumerator.displayID(
-            containing: CGRect(x: -900_000, y: -900_000, width: 100, height: 100)
-        ) == nil)
+    @Test("Favourites survive being reloaded from disk")
+    func favouritesPersist() {
+        let suite = "test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite) ?? .standard
+        FavouritesStore(defaults: defaults).toggle(window(1, app: "Safari", pid: 10))
+        #expect(FavouritesStore(defaults: defaults).contains(window(7, app: "Safari", pid: 55)))
+    }
+
+    @Test("A process with no bundle identifier cannot be pinned")
+    func unidentifiableAppsAreRejected() {
+        // There would be nothing durable to remember it by.
+        let store = makeStore()
+        let raw = AppWindow(
+            id: 1, axElement: nil, pid: 10, bundleIdentifier: nil,
+            appName: "raw-binary", title: "t", isMinimized: false, isFullScreen: false,
+            isOnActiveSpace: true, isAppFocusedWindow: false, frame: .zero, zOrder: 0, bundleURL: nil
+        )
+        #expect(!store.toggle(raw))
+        #expect(store.isEmpty)
+    }
+
+    @Test("Prioritising is a stable partition, not a sort")
+    func prioritisingIsStable() {
+        // The incoming order already encodes recency; it must still decide the
+        // order *within* each group.
+        let store = makeStore()
+        store.toggle(window(3, app: "Notes", pid: 30))
+        let ordered = store.prioritising([
+            window(1, app: "Safari", pid: 10),
+            window(2, app: "Mail", pid: 20),
+            window(3, app: "Notes", pid: 30),
+            window(4, app: "Notes", pid: 30),
+            window(5, app: "Safari", pid: 10)
+        ])
+        #expect(ordered.map(\.id) == [3, 4, 1, 2, 5])
+    }
+
+    @Test("With nothing pinned the order is untouched")
+    func emptyStoreIsANoOp() {
+        let store = makeStore()
+        let input = [window(1, app: "A", pid: 1), window(2, app: "B", pid: 2)]
+        #expect(store.prioritising(input).map(\.id) == input.map(\.id))
+    }
+
+    @Test("Removing by identifier and clearing both work")
+    func removal() {
+        let store = makeStore()
+        store.toggle(window(1, app: "Safari", pid: 10))
+        store.toggle(window(2, app: "Mail", pid: 20))
+        #expect(store.bundleIdentifiers.count == 2)
+        store.remove(store.bundleIdentifiers[0])
+        #expect(store.bundleIdentifiers.count == 1)
+        store.removeAll()
+        #expect(store.isEmpty)
+    }
+
+    @Test("An uninstalled app still gets a readable name")
+    func displayNameFallsBack() {
+        #expect(FavouritesStore.displayName(for: "com.example.LongGone") == "LongGone")
     }
 }
 
 @MainActor
-@Suite("Display filtering")
-struct DisplayFilterTests {
-    private func makeModel(
-        windows: [AppWindow],
-        activeDisplay: CGDirectDisplayID?,
-        includeOtherDisplays: Bool
-    ) -> SwitcherViewModel {
+@Suite("Favourite ordering in the switcher")
+struct FavouriteOrderingTests {
+    private func makeModel(favouring bundleIDs: [String], enabled: Bool = true) -> SwitcherViewModel {
         let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)") ?? .standard
         let preferences = Preferences(defaults: defaults)
         preferences.showActiveAppWindowsFirst = false
-        preferences.includeOtherDisplays = includeOtherDisplays
+        preferences.favouritesFirst = enabled
+
+        let favourites = FavouritesStore(
+            defaults: UserDefaults(suiteName: "test.\(UUID().uuidString)") ?? .standard
+        )
         let model = SwitcherViewModel(
             preferences: preferences,
             iconProvider: IconProvider(),
-            frontmostPID: { nil },
-            activeDisplayID: { activeDisplay }
+            favourites: favourites,
+            frontmostPID: { nil }
         )
-        model.ingest(windows)
+        model.ingest(WindowFixtures.browserAndEditor())
+        for id in bundleIDs {
+            if let match = WindowFixtures.browserAndEditor().first(where: { $0.bundleIdentifier == id }) {
+                favourites.toggle(match)
+            }
+        }
         model.beginSession(reverse: false)
         return model
     }
 
-    private var mixed: [AppWindow] {
-        [
-            WindowFixtures.make(id: 1, app: "Safari", title: "Here", pid: 10, zOrder: 0, displayID: 1),
-            WindowFixtures.make(id: 2, app: "Notes", title: "Other screen", pid: 20, zOrder: 1, displayID: 2),
-            WindowFixtures.make(id: 3, app: "Mail", title: "Minimised", pid: 30, isMinimized: true, zOrder: 2, displayID: 2)
-        ]
+    @Test("Pinned apps lead the list")
+    func favouritesLead() {
+        let model = makeModel(favouring: ["test.terminal"])
+        #expect(model.rows.first?.window.appName == "Terminal")
+        #expect(model.rows.count == 7, "Pinning reorders, it never drops windows")
     }
 
-    @Test("All displays are included by default")
-    func includesEveryDisplay() {
-        let model = makeModel(windows: mixed, activeDisplay: 1, includeOtherDisplays: true)
-        #expect(model.rows.count == 3)
+    @Test("Rows expose their pinned state for the star")
+    func rowsCarryFavouriteFlag() {
+        let model = makeModel(favouring: ["test.terminal"])
+        #expect(model.rows.first?.isFavourite == true)
+        #expect(model.rows.dropFirst().allSatisfy { !$0.isFavourite })
     }
 
-    @Test("Turning it off narrows to the switcher's own display")
-    func narrowsToActiveDisplay() {
-        let model = makeModel(windows: mixed, activeDisplay: 1, includeOtherDisplays: false)
-        #expect(model.rows.map(\.window.id) == [1, 3], "Display 2's on-screen window is excluded")
+    @Test("Turning the preference off restores plain order")
+    func disabledKeepsOrder() {
+        let model = makeModel(favouring: ["test.terminal"], enabled: false)
+        #expect(model.rows.first?.window.appName == "Safari")
     }
 
-    @Test("Minimised windows survive the display filter")
-    func minimisedWindowsAreExempt() {
-        // A minimised window sits on no display at all, so excluding it because
-        // its last-known display is elsewhere would make it unreachable.
-        let model = makeModel(windows: mixed, activeDisplay: 1, includeOtherDisplays: false)
-        #expect(model.rows.contains { $0.window.id == 3 })
+    @Test("Toggling from the panel does not reshuffle mid-session")
+    func toggleDoesNotReorderWhileOpen() {
+        // The session order is frozen precisely so rows never move under the
+        // user's fingers; yanking the highlighted row to the top on ⌘D would be
+        // the worst possible moment to break that.
+        let model = makeModel(favouring: [])
+        model.select(at: 4)
+        let selected = model.selectedWindow?.id
+        let orderBefore = model.rows.map(\.window.id)
+
+        model.toggleFavouriteOnSelection()
+
+        #expect(model.rows.map(\.window.id) == orderBefore)
+        #expect(model.selectedWindow?.id == selected)
+        #expect(model.rows[4].isFavourite, "The star appears immediately")
+    }
+}
+
+@MainActor
+@Suite("Cross-Space retention")
+struct WindowRetentionTests {
+    /// Mirrors `WindowIndex.retaining(_:)` so the merge rule can be asserted
+    /// without a live window server.
+    private func retaining(
+        previous: [AppWindow],
+        reported: [AppWindow],
+        live: Set<CGWindowID>,
+        onScreen: Set<CGWindowID>
+    ) -> [AppWindow] {
+        let described = Set(reported.map(\.id))
+        let carried = previous
+            .filter { !described.contains($0.id) && live.contains($0.id) }
+            .map { $0.onActiveSpace(onScreen.contains($0.id)) }
+        return reported + carried
     }
 
-    @Test("An unknown active display disables the filter rather than emptying the list")
-    func unknownDisplayKeepsEverything() {
-        let model = makeModel(windows: mixed, activeDisplay: nil, includeOtherDisplays: false)
-        #expect(model.rows.count == 3)
+    private var desktopOne: AppWindow { WindowFixtures.make(id: 1, app: "Safari", title: "Here", pid: 10) }
+    private var desktopTwo: AppWindow { WindowFixtures.make(id: 2, app: "Notes", title: "Elsewhere", pid: 20) }
+
+    @Test("A window Accessibility stops reporting is kept while it is still open")
+    func retainsUnreportedButLiveWindows() {
+        // `kAXWindowsAttribute` under-reports windows on other Spaces, so a
+        // plain replace-the-list refresh makes Desktop 2 vanish while the user
+        // is on Desktop 1.
+        let merged = retaining(
+            previous: [desktopOne, desktopTwo],
+            reported: [desktopOne],
+            live: [1, 2],
+            onScreen: [1]
+        )
+        #expect(merged.map(\.id).sorted() == [1, 2])
+    }
+
+    @Test("A retained window is marked as being on another Space")
+    func retainedWindowsAreBadged() throws {
+        let merged = retaining(
+            previous: [desktopOne, desktopTwo],
+            reported: [desktopOne],
+            live: [1, 2],
+            onScreen: [1]
+        )
+        let carried = try #require(merged.first { $0.id == 2 })
+        #expect(!carried.isOnActiveSpace)
+        #expect(WindowPresentation.badge(for: carried)?.text == "Other Space")
+    }
+
+    @Test("A genuinely closed window is dropped")
+    func closedWindowsAreNotResurrected() {
+        // Absent from Accessibility *and* from CoreGraphics means gone.
+        let merged = retaining(
+            previous: [desktopOne, desktopTwo],
+            reported: [desktopOne],
+            live: [1],
+            onScreen: [1]
+        )
+        #expect(merged.map(\.id) == [1])
+    }
+
+    @Test("Retention never duplicates a window Accessibility did report")
+    func noDuplicates() {
+        // The earlier attempt synthesised entries from the CoreGraphics list,
+        // which produced several rows for a single-window app because one
+        // window owns several layer-0 surfaces.
+        let merged = retaining(
+            previous: [desktopOne, desktopTwo],
+            reported: [desktopOne, desktopTwo],
+            live: [1, 2],
+            onScreen: [1, 2]
+        )
+        #expect(merged.count == 2)
+        #expect(Set(merged.map(\.id)).count == merged.count)
+    }
+
+    @Test("A retained window keeps its title and Accessibility element")
+    func retainedWindowsKeepTheirDetail() throws {
+        let merged = retaining(
+            previous: [desktopOne, desktopTwo],
+            reported: [desktopOne],
+            live: [1, 2],
+            onScreen: [1]
+        )
+        let carried = try #require(merged.first { $0.id == 2 })
+        #expect(carried.title == "Elsewhere", "Retention preserves what AX last described")
+        #expect(carried.axElement != nil, "So the window can still be activated directly")
+    }
+}
+
+@Suite("Settings window sizing")
+struct SettingsSizingTests {
+    @Test("The settings pane declares bounds, not a fixed size")
+    func settingsIsBounded() {
+        // Regression: the pane used `.frame(width:)` plus
+        // `.fixedSize(vertical:)`, so the window grew to whatever the content
+        // needed — six sections tall enough to hide the bottom behind the Dock,
+        // with no resize handle to recover.
+        #expect(SettingsView.Metrics.minimumHeight > 0)
+        #expect(SettingsView.Metrics.idealHeight >= SettingsView.Metrics.minimumHeight)
+        #expect(SettingsView.Metrics.idealWidth >= SettingsView.Metrics.minimumWidth)
+    }
+
+    @Test("The ideal size fits comfortably on a small laptop display")
+    func fitsASmallDisplay() {
+        // 1280x800 is the smallest display Apple currently ships; the usable
+        // area is smaller still once the menu bar and Dock are taken out.
+        let usableHeight: CGFloat = 800 - 25 - 70
+        #expect(SettingsView.Metrics.idealHeight < usableHeight)
+        #expect(SettingsView.Metrics.idealWidth < 1280)
     }
 }

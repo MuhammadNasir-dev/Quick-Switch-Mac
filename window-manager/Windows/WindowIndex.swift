@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import CoreGraphics
 import Foundation
+import os
 
 /// The always-warm, MRU-ordered cache of every switchable window.
 ///
@@ -125,10 +126,11 @@ final class WindowIndex: ObservableObject {
         } while needsAnotherPass
     }
 
-    private func apply(_ snapshot: [AppWindow]) {
-        recency.seedIfNeeded(from: snapshot)
-        recency.reconcile(existing: Set(snapshot.map(\.id)))
-        let ordered = recency.ordered(snapshot)
+    private func apply(_ snapshot: WindowEnumerator.Snapshot) {
+        let merged = retaining(snapshot)
+        recency.seedIfNeeded(from: merged)
+        recency.reconcile(existing: Set(merged.map(\.id)))
+        let ordered = recency.ordered(merged)
 
         // Publishing an identical array would invalidate every SwiftUI row for
         // nothing; `AppWindow: Equatable` makes this comparison cheap.
@@ -137,6 +139,34 @@ final class WindowIndex: ObservableObject {
         }
         lastRefresh = Date()
         observation.syncWindowObservations(with: ordered)
+    }
+
+    /// Carries forward windows that are still open but that Accessibility
+    /// omitted from this pass.
+    ///
+    /// `kAXWindowsAttribute` under-reports an application's windows that sit on
+    /// a Space other than the active one, so a plain replace-the-list refresh
+    /// makes everything on Desktop 2 vanish while the user is on Desktop 1 —
+    /// and reappear when they switch. CoreGraphics still lists those windows,
+    /// so a window absent from Accessibility but present in `liveWindowIDs` is
+    /// kept exactly as it was last described, `AXUIElement` and title included.
+    ///
+    /// This is deliberately *retention*, not invention: only windows previously
+    /// described by Accessibility survive. Synthesising entries from the
+    /// CoreGraphics list instead produces duplicates, because a single window
+    /// routinely owns several layer-0 surfaces that no public API distinguishes
+    /// from real windows.
+    private func retaining(_ snapshot: WindowEnumerator.Snapshot) -> [AppWindow] {
+        let reported = Set(snapshot.windows.map(\.id))
+        let carriedOver = windows.filter { window in
+            !reported.contains(window.id) && snapshot.liveWindowIDs.contains(window.id)
+        }
+        guard !carriedOver.isEmpty else { return snapshot.windows }
+
+        Log.windows.debug("Carrying over \(carriedOver.count, privacy: .public) window(s) Accessibility did not report")
+        return snapshot.windows + carriedOver.map {
+            $0.onActiveSpace(snapshot.onScreenWindowIDs.contains($0.id))
+        }
     }
 
     // MARK: - Recency

@@ -20,7 +20,7 @@ struct WindowEnumeratorTests {
     @Test("Enumeration never traps and never returns duplicates")
     func snapshotIsWellFormed() {
         guard AXIsProcessTrusted() else { return }
-        let windows = WindowEnumerator().snapshot()
+        let windows = WindowEnumerator().snapshot().windows
         let ids = windows.map(\.id)
         #expect(Set(ids).count == ids.count, "Each window must appear exactly once")
         #expect(windows.allSatisfy { $0.id != 0 })
@@ -31,7 +31,7 @@ struct WindowEnumeratorTests {
     @Test("Excluded system processes never appear")
     func excludesSystemUI() {
         guard AXIsProcessTrusted() else { return }
-        let windows = WindowEnumerator().snapshot()
+        let windows = WindowEnumerator().snapshot().windows
         let bundleIDs = Set(windows.compactMap(\.bundleIdentifier))
         #expect(bundleIDs.isDisjoint(with: WindowFilter.excludedBundleIdentifiers))
         #expect(!windows.contains { $0.pid == ProcessInfo.processInfo.processIdentifier })

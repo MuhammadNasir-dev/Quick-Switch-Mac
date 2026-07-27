@@ -21,8 +21,6 @@ nonisolated struct AppWindow: Identifiable, Hashable, @unchecked Sendable {
     /// expose it.
     let axElement: AXElementRef?
 
-    /// Display the window is on, used by the "other displays" filter.
-    let displayID: CGDirectDisplayID?
     let pid: pid_t
     let bundleIdentifier: String?
     /// Localised application name, e.g. "Safari".
@@ -71,6 +69,29 @@ nonisolated struct AppWindow: Identifiable, Hashable, @unchecked Sendable {
 }
 
 extension AppWindow {
+    /// A copy with refreshed Space membership.
+    ///
+    /// Used when an entry is carried over from a previous pass: the window is
+    /// still alive, but whether it is on the Space in front of the user may
+    /// have changed since Accessibility last described it.
+    func onActiveSpace(_ isOnActiveSpace: Bool) -> AppWindow {
+        AppWindow(
+            id: id,
+            axElement: axElement,
+            pid: pid,
+            bundleIdentifier: bundleIdentifier,
+            appName: appName,
+            title: title,
+            isMinimized: isMinimized,
+            isFullScreen: isFullScreen,
+            isOnActiveSpace: isOnActiveSpace,
+            isAppFocusedWindow: isAppFocusedWindow,
+            frame: frame,
+            zOrder: zOrder,
+            bundleURL: bundleURL
+        )
+    }
+
     /// Short status string shown on the trailing edge of a row.
     var statusLabel: String? {
         if isMinimized { return "Minimised" }

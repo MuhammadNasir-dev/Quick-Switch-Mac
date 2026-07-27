@@ -52,15 +52,38 @@ nonisolated struct WindowEnumerator: Sendable {
         var pid: pid_t
     }
 
+    /// One pass over the system.
+    struct Snapshot: Sendable {
+        /// Windows Accessibility described this time round.
+        var windows: [AppWindow]
+        /// Every layer-0 window CoreGraphics can see, whether or not
+        /// Accessibility mentioned it. Lets the index tell "this window closed"
+        /// apart from "Accessibility stopped reporting it".
+        var liveWindowIDs: Set<CGWindowID>
+        /// Windows composited on the Space currently being looked at.
+        var onScreenWindowIDs: Set<CGWindowID>
+    }
+
     /// Produces the current window list, unordered beyond z-order.
     ///
     /// Safe to call from any thread; must not be called on the main thread in
     /// production paths.
-    nonisolated func snapshot() -> [AppWindow] {
+    nonisolated func snapshot() -> Snapshot {
         let cgWindows = copyCGWindowMetadata()
         let applications = switchableApplications()
         let harvested = harvestWindows(from: applications, cgWindows: cgWindows)
-        return harvested
+
+        // Only layer-0 windows of switchable processes count as "alive"; a
+        // window ID belonging to the Dock must never keep an entry breathing.
+        let switchablePIDs = Set(applications.map(\.processIdentifier))
+        var live: Set<CGWindowID> = []
+        var onScreen: Set<CGWindowID> = []
+        for (id, metadata) in cgWindows where metadata.layer == 0 && switchablePIDs.contains(metadata.pid) {
+            live.insert(id)
+            if metadata.isOnActiveSpace { onScreen.insert(id) }
+        }
+
+        return Snapshot(windows: harvested, liveWindowIDs: live, onScreenWindowIDs: onScreen)
     }
 
     // MARK: - CGWindowList
@@ -146,11 +169,6 @@ nonisolated struct WindowEnumerator: Sendable {
         }
 
         var windows = collector.drain()
-        windows += windowsMissedByAccessibility(
-            knownIDs: Set(windows.map(\.id)),
-            applications: applications,
-            cgWindows: cgWindows
-        )
         // Deterministic base order; `WindowStore` applies recency on top.
         windows.sort { lhs, rhs in
             if lhs.zOrder != rhs.zOrder { return lhs.zOrder < rhs.zOrder }
@@ -158,89 +176,6 @@ nonisolated struct WindowEnumerator: Sendable {
             return lhs.id < rhs.id
         }
         return windows
-    }
-
-    /// Recovers windows that `CGWindowList` can see but Accessibility did not
-    /// report — overwhelmingly windows sitting on another Space.
-    ///
-    /// `kAXWindowsAttribute` is documented as returning an application's
-    /// windows, but in practice it omits windows on Spaces other than the
-    /// active one for most applications. Relying on it alone means the switcher
-    /// silently hides everything on Desktop 2 while the user is on Desktop 1,
-    /// which defeats the entire purpose of the app.
-    ///
-    /// These entries carry no `AXUIElement` — there is nothing to attach to
-    /// until the owning app is frontmost — and no real title, because
-    /// `kCGWindowName` requires Screen Recording permission that this app
-    /// deliberately never asks for. They are therefore held to a stricter size
-    /// rule than Accessibility-backed windows: without a subrole to inspect,
-    /// geometry is the only signal separating a real window from the many
-    /// helper surfaces every process publishes.
-    private nonisolated func windowsMissedByAccessibility(
-        knownIDs: Set<CGWindowID>,
-        applications: [NSRunningApplication],
-        cgWindows: [CGWindowID: CGWindowMetadata]
-    ) -> [AppWindow] {
-        var byPID: [pid_t: NSRunningApplication] = [:]
-        for app in applications { byPID[app.processIdentifier] = app }
-
-        var result: [AppWindow] = []
-        for (windowID, metadata) in cgWindows where !knownIDs.contains(windowID) {
-            guard let app = byPID[metadata.pid] else { continue }
-            guard filter.allowsCGOnlyWindow(
-                layer: metadata.layer,
-                alpha: metadata.alpha,
-                bounds: metadata.bounds
-            ) else { continue }
-
-            result.append(
-                AppWindow(
-                    id: windowID,
-                    axElement: nil,
-                    displayID: Self.displayID(containing: metadata.bounds),
-                    pid: metadata.pid,
-                    bundleIdentifier: app.bundleIdentifier,
-                    appName: app.localizedName ?? metadata.ownerName,
-                    // No Accessibility element means no title. The app name is
-                    // the honest fallback; `displayTitle` already handles it.
-                    title: "",
-                    isMinimized: false,
-                    isFullScreen: false,
-                    isOnActiveSpace: metadata.isOnActiveSpace,
-                    isAppFocusedWindow: false,
-                    frame: metadata.bounds,
-                    zOrder: metadata.zOrder,
-                    bundleURL: app.bundleURL
-                )
-            )
-        }
-        return result
-    }
-
-    /// The display a window mostly occupies.
-    ///
-    /// Works in CoreGraphics' global space, where both window bounds and
-    /// `CGDisplayBounds` use a top-left origin — no flipping between the AppKit
-    /// and CoreGraphics coordinate systems, which is the usual source of
-    /// off-by-one-screen bugs here.
-    nonisolated static func displayID(containing frame: CGRect) -> CGDirectDisplayID? {
-        guard !frame.isEmpty else { return nil }
-
-        var count: UInt32 = 0
-        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return nil }
-        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        guard CGGetActiveDisplayList(count, &displays, &count) == .success else { return nil }
-
-        var best: (id: CGDirectDisplayID, area: CGFloat)?
-        for display in displays.prefix(Int(count)) {
-            let intersection = frame.intersection(CGDisplayBounds(display))
-            guard !intersection.isNull else { continue }
-            let area = intersection.width * intersection.height
-            if area > (best?.area ?? 0) {
-                best = (display, area)
-            }
-        }
-        return best?.id
     }
 
     private nonisolated func windowsForApplication(
@@ -313,7 +248,6 @@ nonisolated struct WindowEnumerator: Sendable {
                 AppWindow(
                     id: windowID,
                     axElement: AXElementRef(axWindow),
-                    displayID: Self.displayID(containing: frame ?? metadata?.bounds ?? .zero),
                     pid: pid,
                     bundleIdentifier: bundleID,
                     appName: appName,

@@ -24,6 +24,8 @@ nonisolated enum KeyCode {
     static let graveAccent: Int64 = 50
     /// ⌘L toggles between the list and grid layouts.
     static let letterL: Int64 = 37
+    /// ⌘D pins or unpins the selected window's application.
+    static let letterD: Int64 = 2
 
     /// Number-row digits 1…9 then 0, in order.
     static let digitRow: [Int64] = [18, 19, 20, 21, 23, 22, 26, 28, 25, 29]

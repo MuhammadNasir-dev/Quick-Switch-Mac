@@ -17,7 +17,7 @@ final class Preferences: ObservableObject {
         static let maximumVisibleRows = "switcher.maximumVisibleRows"
         static let layout = "switcher.layout"
         static let activeAppFirst = "switcher.activeAppFirst"
-        static let includeOtherDisplays = "switcher.includeOtherDisplays"
+        static let favouritesFirst = "switcher.favouritesFirst"
     }
 
     private let defaults: UserDefaults
@@ -39,13 +39,6 @@ final class Preferences: ObservableObject {
 
     @Published var includeOtherSpaces: Bool {
         didSet { defaults.set(includeOtherSpaces, forKey: Key.includeOtherSpaces) }
-    }
-
-    /// Include windows living on a display other than the one the switcher
-    /// appeared on. On by default — a window is no less switchable for being on
-    /// the second monitor.
-    @Published var includeOtherDisplays: Bool {
-        didSet { defaults.set(includeOtherDisplays, forKey: Key.includeOtherDisplays) }
     }
 
     @Published var showShortcutHints: Bool {
@@ -77,6 +70,11 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(showActiveAppWindowsFirst, forKey: Key.activeAppFirst) }
     }
 
+    /// Sorts pinned applications above everything else.
+    @Published var favouritesFirst: Bool {
+        didSet { defaults.set(favouritesFirst, forKey: Key.favouritesFirst) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: [
@@ -88,7 +86,7 @@ final class Preferences: ObservableObject {
             Key.maximumVisibleRows: 9,
             Key.layout: SwitcherLayout.list.rawValue,
             Key.activeAppFirst: true,
-            Key.includeOtherDisplays: true
+            Key.favouritesFirst: true
         ])
 
         let rawModifier = defaults.string(forKey: Key.modifier) ?? SwitcherModifier.option.rawValue
@@ -100,6 +98,6 @@ final class Preferences: ObservableObject {
         maximumVisibleRows = min(max(defaults.integer(forKey: Key.maximumVisibleRows), 4), 16)
         layout = SwitcherLayout(rawValue: defaults.string(forKey: Key.layout) ?? "") ?? .list
         showActiveAppWindowsFirst = defaults.bool(forKey: Key.activeAppFirst)
-        includeOtherDisplays = defaults.bool(forKey: Key.includeOtherDisplays)
+        favouritesFirst = defaults.bool(forKey: Key.favouritesFirst)
     }
 }

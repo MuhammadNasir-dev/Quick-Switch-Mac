@@ -21,13 +21,11 @@ enum WindowFixtures {
         isOnActiveSpace: Bool = true,
         isAppFocusedWindow: Bool = false,
         zOrder: Int = 0,
-        displayID: CGDirectDisplayID? = nil,
         hasAXElement: Bool = true
     ) -> AppWindow {
         AppWindow(
             id: id,
             axElement: hasAXElement ? AXElementRef(AXUIElementCreateSystemWide()) : nil,
-            displayID: displayID,
             pid: pid,
             bundleIdentifier: "test.\(app.lowercased())",
             appName: app,

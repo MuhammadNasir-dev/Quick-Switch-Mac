@@ -47,6 +47,7 @@ final class SwitcherController {
         authorizer: AccessibilityAuthorizer,
         hotKeyMonitor: HotKeyMonitor,
         iconProvider: IconProvider,
+        favourites: FavouritesStore,
         activator: WindowActivator? = nil
     ) {
         let activator = activator ?? WindowActivator()
@@ -56,7 +57,11 @@ final class SwitcherController {
         self.hotKeyMonitor = hotKeyMonitor
         self.activator = activator
         self.panel = SwitcherPanel()
-        self.viewModel = SwitcherViewModel(preferences: preferences, iconProvider: iconProvider)
+        self.viewModel = SwitcherViewModel(
+            preferences: preferences,
+            iconProvider: iconProvider,
+            favourites: favourites
+        )
 
         viewModel.bind(to: windowIndex, authorizer: authorizer)
         buildContentView()
@@ -220,6 +225,11 @@ final class SwitcherController {
         case .confirm:
             guard isVisible else { return }
             confirm()
+
+        case .toggleFavourite:
+            guard isVisible else { return }
+            viewModel.pin()
+            viewModel.toggleFavouriteOnSelection()
 
         case .toggleLayout:
             guard isVisible else { return }

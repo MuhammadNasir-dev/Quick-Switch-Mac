@@ -87,6 +87,13 @@ struct WindowRowView: View {
 
             Spacer(minLength: 8)
 
+            if row.isFavourite {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.yellow)
+                    .accessibilityHidden(true)
+            }
+
             if let badge = WindowPresentation.badge(for: window) {
                 BadgeView(badge: badge, compact: false)
             }
@@ -103,7 +110,10 @@ struct WindowRowView: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(window.appName), \(window.displayTitle)")
-        .accessibilityValue(WindowPresentation.badge(for: window)?.text ?? "")
+        .accessibilityValue(
+            [row.isFavourite ? "Favourite" : nil, WindowPresentation.badge(for: window)?.text]
+                .compactMap { $0 }.joined(separator: ", ")
+        )
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 }
@@ -174,6 +184,14 @@ struct WindowCardView: View {
                 }
             }
             .frame(height: 48)
+            .overlay(alignment: .topLeading) {
+                if row.isFavourite {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.yellow)
+                        .accessibilityHidden(true)
+                }
+            }
 
             VStack(spacing: 1) {
                 WindowPresentation.highlighted(window.displayTitle, indices: row.highlightedTitleIndices)
@@ -208,7 +226,10 @@ struct WindowCardView: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(window.appName), \(window.displayTitle)")
-        .accessibilityValue(WindowPresentation.badge(for: window)?.text ?? "")
+        .accessibilityValue(
+            [row.isFavourite ? "Favourite" : nil, WindowPresentation.badge(for: window)?.text]
+                .compactMap { $0 }.joined(separator: ", ")
+        )
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 }

@@ -297,7 +297,7 @@ struct SwitcherView: View {
             ShortcutHint(keys: ["\(preferences.modifier.symbol)⇥"], label: "next")
             ShortcutHint(keys: layout == .grid ? ["↑", "↓", "←", "→"] : ["↑", "↓"], label: "navigate")
             ShortcutHint(keys: ["⏎"], label: "switch")
-            ShortcutHint(keys: ["⌘1–9"], label: "jump")
+            ShortcutHint(keys: ["⌘D"], label: "pin")
             Spacer(minLength: 8)
             ShortcutHint(keys: ["esc"], label: "cancel")
         }
