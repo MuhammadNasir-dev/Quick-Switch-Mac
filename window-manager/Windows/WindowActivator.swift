@@ -54,9 +54,6 @@ final class WindowActivator {
     // MARK: - Implementation
 
     private func performActivation(_ window: AppWindow) async {
-        let element = window.axElement.element
-        AX.setMessagingTimeout(element, seconds: 0.5)
-
         guard let runningApp = NSRunningApplication(processIdentifier: window.pid) else {
             Log.activation.error("pid \(window.pid, privacy: .public) is gone")
             return
@@ -64,6 +61,26 @@ final class WindowActivator {
 
         let appElement = AXUIElementCreateApplication(window.pid)
         AX.setMessagingTimeout(appElement, seconds: 0.5)
+
+        // Windows discovered only through `CGWindowList` — typically ones on
+        // another Space — have no Accessibility element yet, because macOS does
+        // not expose them until their owner is frontmost. Activate the app
+        // first, then resolve the element by window number.
+        var element: AXUIElement
+        if let known = window.axElement?.element {
+            element = known
+        } else {
+            runningApp.activate()
+            guard let resolved = await resolveElement(for: window, in: appElement) else {
+                // The app is at least frontmost, which usually brings the right
+                // Space with it — better than doing nothing.
+                Log.activation.notice("No AX element for window \(window.id, privacy: .public); activated its app only")
+                onActivated?(window)
+                return
+            }
+            element = resolved
+        }
+        AX.setMessagingTimeout(element, seconds: 0.5)
 
         // 1. Un-hide the process. A hidden app ignores raise requests entirely,
         //    and `activate()` alone does not always unhide it.
@@ -102,6 +119,23 @@ final class WindowActivator {
         // Still report it: the app is frontmost even if the specific window
         // could not be confirmed, so recency should follow the user's intent.
         onActivated?(window)
+    }
+
+    /// Polls for the Accessibility element matching a window number.
+    ///
+    /// Activation makes the owning app frontmost and pulls its Space forward;
+    /// only then does `kAXWindowsAttribute` include the window. The delay is
+    /// therefore unavoidable rather than a workaround for a race we control.
+    private func resolveElement(for window: AppWindow, in appElement: AXUIElement) async -> AXUIElement? {
+        for attempt in 0..<6 {
+            try? await Task.sleep(for: .milliseconds(attempt == 0 ? 80 : 120))
+            if Task.isCancelled { return nil }
+            for candidate in AX.elements(appElement, kAXWindowsAttribute as String)
+            where AXPrivateAPI.windowID(of: candidate) == window.id {
+                return candidate
+            }
+        }
+        return nil
     }
 
     /// The ordering that actually works, applied atomically enough that no step

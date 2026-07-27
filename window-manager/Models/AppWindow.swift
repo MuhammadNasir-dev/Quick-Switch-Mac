@@ -10,8 +10,19 @@ import CoreGraphics
 nonisolated struct AppWindow: Identifiable, Hashable, @unchecked Sendable {
     /// `CGWindowID` (the window "number"). Unique for the lifetime of the window.
     let id: CGWindowID
-    /// Accessibility handle used for activation. Never persisted across refreshes.
-    let axElement: AXElementRef
+    /// Accessibility handle used for activation.
+    ///
+    /// `nil` for windows discovered only through `CGWindowList`. The
+    /// Accessibility API does not reliably report an application's windows that
+    /// live on another Space, so a window the user can plainly see on Desktop 2
+    /// is often absent from `kAXWindowsAttribute` while Desktop 1 is active.
+    /// Those windows are still listed — activation resolves the element after
+    /// bringing the owning app forward, which is the point at which macOS does
+    /// expose it.
+    let axElement: AXElementRef?
+
+    /// Display the window is on, used by the "other displays" filter.
+    let displayID: CGDirectDisplayID?
     let pid: pid_t
     let bundleIdentifier: String?
     /// Localised application name, e.g. "Safari".

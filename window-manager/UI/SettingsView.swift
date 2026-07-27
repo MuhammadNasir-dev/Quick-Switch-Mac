@@ -84,6 +84,11 @@ struct SettingsView: View {
 
                 Toggle("Include minimised windows", isOn: $preferences.includeMinimized)
                 Toggle("Include windows on other Spaces", isOn: $preferences.includeOtherSpaces)
+                Toggle("Include windows on other displays", isOn: $preferences.includeOtherDisplays)
+                Text("Turn either off to narrow the switcher to the Space or display you are looking at.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Permissions") {

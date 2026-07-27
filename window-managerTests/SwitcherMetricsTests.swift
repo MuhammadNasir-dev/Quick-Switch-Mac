@@ -508,3 +508,131 @@ struct MenuHeaderViewTests {
         #expect(opened)
     }
 }
+
+@Suite("Cross-Space and cross-display windows")
+struct MultiSpaceTests {
+    private let filter = WindowFilter(ownPID: 999)
+
+    @Test("CoreGraphics-only windows are held to a stricter size rule")
+    func cgOnlyWindowsAreStricter() {
+        // A live system publishes dozens of layer-0 surfaces that are not
+        // windows: menu-bar strips at 1680x24, 54x54 helpers, 0x0 placeholders.
+        // Without a subrole to inspect, size is the only thing separating them
+        // from a real window on another Space.
+        let junk = [
+            CGRect(x: 0, y: 0, width: 1680, height: 24),   // menu-bar strip
+            CGRect(x: 0, y: 0, width: 54, height: 54),     // helper surface
+            CGRect(x: 0, y: 0, width: 0, height: 0),       // placeholder
+            CGRect(x: 0, y: 0, width: 188, height: 35)     // auth prompt strip
+        ]
+        for bounds in junk {
+            #expect(!filter.allowsCGOnlyWindow(layer: 0, alpha: 1, bounds: bounds),
+                    "\(bounds.size) should not be listed")
+        }
+
+        let real = [
+            CGRect(x: 0, y: 0, width: 1009, height: 656),
+            CGRect(x: 0, y: 0, width: 500, height: 500)
+        ]
+        for bounds in real {
+            #expect(filter.allowsCGOnlyWindow(layer: 0, alpha: 1, bounds: bounds))
+        }
+    }
+
+    @Test("The stricter rule never admits what the normal rule rejects")
+    func cgOnlyIsASubset() {
+        let cases: [(Int, CGFloat, CGRect)] = [
+            (24, 1, CGRect(x: 0, y: 0, width: 400, height: 400)),   // menu-bar layer
+            (0, 0, CGRect(x: 0, y: 0, width: 400, height: 400)),    // transparent
+            (0, 1, CGRect(x: 0, y: 0, width: 10, height: 10))       // tiny
+        ]
+        for (layer, alpha, bounds) in cases {
+            if filter.allowsCGOnlyWindow(layer: layer, alpha: alpha, bounds: bounds) {
+                #expect(filter.allowsCGWindow(layer: layer, alpha: alpha, bounds: bounds))
+            }
+        }
+    }
+
+    @Test("Off-Space windows are not rejected for being transparent")
+    func offSpaceWindowsKeepTheirAlpha() {
+        // Measured on a live system: windows on another Space report alpha 1.0,
+        // so the alpha rule must not be what hides them.
+        #expect(filter.allowsCGWindow(
+            layer: 0, alpha: 1, bounds: CGRect(x: 0, y: 0, width: 1009, height: 656)
+        ))
+    }
+
+    @Test("Display lookup ignores empty frames")
+    func displayLookupIgnoresEmptyFrames() {
+        #expect(WindowEnumerator.displayID(containing: .zero) == nil)
+    }
+
+    @Test("A window is attributed to the display it mostly covers")
+    func displayLookupPicksLargestOverlap() {
+        // Against the real display list: a frame covering the main display must
+        // resolve to a display, and one far outside every display must not.
+        let main = CGDisplayBounds(CGMainDisplayID())
+        #expect(WindowEnumerator.displayID(containing: main.insetBy(dx: 10, dy: 10)) != nil)
+        #expect(WindowEnumerator.displayID(
+            containing: CGRect(x: -900_000, y: -900_000, width: 100, height: 100)
+        ) == nil)
+    }
+}
+
+@MainActor
+@Suite("Display filtering")
+struct DisplayFilterTests {
+    private func makeModel(
+        windows: [AppWindow],
+        activeDisplay: CGDirectDisplayID?,
+        includeOtherDisplays: Bool
+    ) -> SwitcherViewModel {
+        let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)") ?? .standard
+        let preferences = Preferences(defaults: defaults)
+        preferences.showActiveAppWindowsFirst = false
+        preferences.includeOtherDisplays = includeOtherDisplays
+        let model = SwitcherViewModel(
+            preferences: preferences,
+            iconProvider: IconProvider(),
+            frontmostPID: { nil },
+            activeDisplayID: { activeDisplay }
+        )
+        model.ingest(windows)
+        model.beginSession(reverse: false)
+        return model
+    }
+
+    private var mixed: [AppWindow] {
+        [
+            WindowFixtures.make(id: 1, app: "Safari", title: "Here", pid: 10, zOrder: 0, displayID: 1),
+            WindowFixtures.make(id: 2, app: "Notes", title: "Other screen", pid: 20, zOrder: 1, displayID: 2),
+            WindowFixtures.make(id: 3, app: "Mail", title: "Minimised", pid: 30, isMinimized: true, zOrder: 2, displayID: 2)
+        ]
+    }
+
+    @Test("All displays are included by default")
+    func includesEveryDisplay() {
+        let model = makeModel(windows: mixed, activeDisplay: 1, includeOtherDisplays: true)
+        #expect(model.rows.count == 3)
+    }
+
+    @Test("Turning it off narrows to the switcher's own display")
+    func narrowsToActiveDisplay() {
+        let model = makeModel(windows: mixed, activeDisplay: 1, includeOtherDisplays: false)
+        #expect(model.rows.map(\.window.id) == [1, 3], "Display 2's on-screen window is excluded")
+    }
+
+    @Test("Minimised windows survive the display filter")
+    func minimisedWindowsAreExempt() {
+        // A minimised window sits on no display at all, so excluding it because
+        // its last-known display is elsewhere would make it unreachable.
+        let model = makeModel(windows: mixed, activeDisplay: 1, includeOtherDisplays: false)
+        #expect(model.rows.contains { $0.window.id == 3 })
+    }
+
+    @Test("An unknown active display disables the filter rather than emptying the list")
+    func unknownDisplayKeepsEverything() {
+        let model = makeModel(windows: mixed, activeDisplay: nil, includeOtherDisplays: false)
+        #expect(model.rows.count == 3)
+    }
+}

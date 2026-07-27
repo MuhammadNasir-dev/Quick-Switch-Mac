@@ -71,6 +71,12 @@ the list still leads it. Arrow keys, <kbd>⌘</kbd><kbd>1</kbd>–<kbd>9</kbd> a
 search all address the same flat sequence in every layout — headers are never
 selectable.
 
+**Include windows on other Spaces / displays** (both on by default) control how
+far the switcher reaches. Turn either off to narrow it to the Desktop or monitor
+you are looking at. Minimised windows are exempt from both — a minimised window
+belongs to no Space and no display, so filtering it out would make it
+unreachable.
+
 **Show the active app's windows first** (on by default) groups every window of
 the app you are currently in at the top, then everything else in
 most-recently-used order. Turn it off in Settings for strict MRU, where the
@@ -115,7 +121,7 @@ depends on the private `showSettingsWindow:` action reaching a responder that an
 ## Tests
 
 ```bash
-xcodebuild -project window-manager.xcodeproj -scheme window-manager -destination 'platform=macOS' test
+xcodebuild -project window-manager.xcodeproj -scheme QuickSwitch -destination 'platform=macOS' test
 ```
 
 Filtering, fuzzy matching, MRU ordering, selection, panel geometry and
@@ -185,6 +191,32 @@ are still named `window-manager` — internal identifiers that nothing
 user-visible depends on. Renaming those too is a mechanical follow-up if you
 want the repository to match the product.
 
+## Releases
+
+`.github/workflows/release.yml` builds, signs and publishes on a tag:
+
+```bash
+git tag v1.0.1 && git push origin v1.0.1
+```
+
+It produces **two** archives — `apple-silicon` (arm64) and `intel` (x86_64) —
+attaches them plus SHA-256 sums to a GitHub Release, and verifies each build
+with `lipo` so a mislabelled slice cannot ship. It also fails the build if
+`get-task-allow` is present, which is the debug entitlement that must never be
+released.
+
+Signing is optional so the workflow is useful immediately. Without secrets it
+produces ad-hoc signed builds that run locally but that Gatekeeper refuses
+elsewhere. Add these repository secrets to get signed, notarized builds:
+
+| Secret | Purpose |
+| --- | --- |
+| `DEVELOPER_ID_CERTIFICATE_P12` | Base64 of the exported Developer ID Application certificate |
+| `DEVELOPER_ID_CERTIFICATE_PASSWORD` | Password used when exporting it |
+| `APPLE_TEAM_ID` | Ten-character team identifier |
+| `APPLE_ID` | Apple ID for notarization |
+| `APPLE_APP_PASSWORD` | App-specific password for that Apple ID |
+
 ## Known macOS limitations
 
 * **Accessibility access cannot be granted programmatically**, and it is
@@ -197,6 +229,12 @@ want the repository to match the product.
   degrades to geometry correlation rather than failing to launch.
 * **Window titles via `CGWindowList` need Screen Recording.** Titles are read
   through Accessibility instead, so that permission is never requested.
+* **Accessibility under-reports windows on other Spaces.** `kAXWindowsAttribute`
+  routinely omits an application's windows that sit on a Space other than the
+  active one. Those windows are recovered from `CGWindowList`, but without an
+  Accessibility element there is no title for them until their app is brought
+  forward — they appear under the application's own name, and activating one
+  resolves the real window once macOS exposes it.
 * **Full-screen Spaces animate.** Activating a window in another full-screen
   Space triggers the system's ~0.5 s Space transition, which cannot be skipped.
 * **Sandboxing is off** — required, since a sandboxed process can neither

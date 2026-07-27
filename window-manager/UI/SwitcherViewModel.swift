@@ -54,6 +54,11 @@ final class SwitcherViewModel: ObservableObject {
     /// Injected so ordering can be tested without a running window server.
     private let frontmostPID: () -> pid_t?
 
+    /// Display the switcher is being shown on. Injected for the same reason as
+    /// `frontmostPID`: so ordering and filtering are testable offline.
+    private let activeDisplayID: () -> CGDirectDisplayID?
+    private var sessionDisplayID: CGDirectDisplayID?
+
     /// Captured at `beginSession` rather than read live: once the switcher
     /// activates a window the frontmost app changes, and the list must not
     /// reshuffle underneath the user mid-session.
@@ -78,11 +83,20 @@ final class SwitcherViewModel: ObservableObject {
     init(
         preferences: Preferences,
         iconProvider: IconProvider,
-        frontmostPID: (() -> pid_t?)? = nil
+        frontmostPID: (() -> pid_t?)? = nil,
+        activeDisplayID: (() -> CGDirectDisplayID?)? = nil
     ) {
         self.preferences = preferences
         self.iconProvider = iconProvider
         self.frontmostPID = frontmostPID ?? { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+        self.activeDisplayID = activeDisplayID ?? {
+            // The screen under the pointer is the one the panel appears on.
+            let mouse = NSEvent.mouseLocation
+            let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
+            return screen?.deviceDescription[
+                NSDeviceDescriptionKey("NSScreenNumber")
+            ] as? CGDirectDisplayID
+        }
     }
 
     /// Binds to the shared window index.
@@ -107,9 +121,10 @@ final class SwitcherViewModel: ObservableObject {
             preferences.$includeMinimized.map { _ in }.eraseToAnyPublisher(),
             preferences.$includeOtherSpaces.map { _ in }.eraseToAnyPublisher(),
             preferences.$showActiveAppWindowsFirst.map { _ in }.eraseToAnyPublisher(),
+            preferences.$includeOtherDisplays.map { _ in }.eraseToAnyPublisher(),
             preferences.$layout.map { _ in }.eraseToAnyPublisher()
         )
-        .dropFirst(4) // the four replayed current values at subscription time
+        .dropFirst(5) // the five replayed current values at subscription time
         // `rebuildRows` reads these preferences back, and `@Published` emits
         // from `willSet` — without the hop the rebuild would use the values
         // that were just replaced.
@@ -137,6 +152,7 @@ final class SwitcherViewModel: ObservableObject {
         query = ""
         isPinned = false
         sessionFrontmostPID = frontmostPID()
+        sessionDisplayID = activeDisplayID()
         // Clear first so the fresh ordering is computed from live recency,
         // then pin whatever that produced for the rest of the session.
         sessionOrder = nil
@@ -157,6 +173,7 @@ final class SwitcherViewModel: ObservableObject {
         query = ""
         isPinned = false
         sessionFrontmostPID = nil
+        sessionDisplayID = nil
         sessionOrder = nil
     }
 
@@ -257,6 +274,14 @@ final class SwitcherViewModel: ObservableObject {
         }
         if !preferences.includeOtherSpaces {
             candidates.removeAll { !$0.isOnActiveSpace && !$0.isMinimized }
+        }
+        if !preferences.includeOtherDisplays, let display = sessionDisplayID {
+            // A minimised window sits on no display, so it is never excluded by
+            // a display filter — the same reasoning as the Space filter.
+            candidates.removeAll { window in
+                guard !window.isMinimized, let windowDisplay = window.displayID else { return false }
+                return windowDisplay != display
+            }
         }
 
         let trimmedQuery = query.trimmingCharacters(in: .whitespaces)

@@ -116,7 +116,10 @@ final class WindowObservationCenter {
         guard isRunning else { return }
         var byProcess: [pid_t: Set<AXElementRef>] = [:]
         for window in windows {
-            byProcess[window.pid, default: []].insert(window.axElement)
+            // Windows found only through CoreGraphics have no element to watch;
+            // the app-level observer still reports when they appear or vanish.
+            guard let element = window.axElement else { continue }
+            byProcess[window.pid, default: []].insert(element)
         }
         for (pid, elements) in byProcess {
             if observers[pid] == nil { attachObserver(to: pid) }
