@@ -11,8 +11,8 @@ import AppKit
 /// measured once per open at a fixed height, so constraints would buy nothing
 /// and cost a layout pass every time the menu appears.
 final class MenuHeaderView: NSView {
-    static let preferredWidth: CGFloat = 268
-    static let preferredHeight: CGFloat = 58
+    nonisolated static let preferredWidth: CGFloat = 268
+    nonisolated static let preferredHeight: CGFloat = 58
 
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "QuickSwitch")
@@ -26,7 +26,7 @@ final class MenuHeaderView: NSView {
         }
     }
 
-    fileprivate enum Metrics {
+    fileprivate nonisolated enum Metrics {
         static let horizontalInset: CGFloat = 14
         static let iconSize: CGFloat = 32
         static let textLeading: CGFloat = 54
@@ -91,7 +91,7 @@ final class MenuHeaderView: NSView {
     /// Exposed as a pure function of the view's size so the trailing-edge
     /// anchoring can be asserted directly, rather than inferred from rendered
     /// pixels — which would make the test hostage to font metrics.
-    static func gearRect(in size: NSSize) -> NSRect {
+    nonisolated static func gearRect(in size: NSSize) -> NSRect {
         NSRect(
             x: size.width - Metrics.horizontalInset - Metrics.buttonSize.width,
             y: (size.height - Metrics.buttonSize.height) / 2,

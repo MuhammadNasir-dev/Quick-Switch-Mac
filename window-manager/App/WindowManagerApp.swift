@@ -20,7 +20,8 @@ struct WindowManagerApp: App {
                     preferences: services.preferences,
                     authorizer: services.authorizer,
                     launchAtLogin: services.launchAtLogin,
-                    favourites: services.favourites
+                    favourites: services.favourites,
+                    updates: services.updates
                 )
             } else {
                 // Only reachable if the scene body runs before
@@ -68,7 +69,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                     preferences: services.preferences,
                     authorizer: services.authorizer,
                     launchAtLogin: services.launchAtLogin,
-                    favourites: services.favourites
+                    favourites: services.favourites,
+                    updates: services.updates
                 )
             }
             self.settings = settings

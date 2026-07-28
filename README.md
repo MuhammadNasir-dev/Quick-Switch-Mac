@@ -17,8 +17,9 @@ applications.
 
 ## Setup
 
-1. Move **QuickSwitch.app** to `/Applications`, then launch it. There is no Dock
-   icon; look for the window icon in the menu bar.
+1. Open the `.dmg` and drag **QuickSwitch** onto the **Applications** shortcut,
+   then launch it. There is no Dock icon; look for the window icon in the menu
+   bar.
 2. Grant **Accessibility** access when prompted (System Settings → Privacy &
    Security → Accessibility). The setup window detects the change automatically
    — no relaunch.
@@ -200,17 +201,34 @@ want the repository to match the product.
 
 ## Releases
 
-`.github/workflows/release.yml` builds, signs and publishes on a tag:
+This repository is private and releases are uploaded to the public
+[QuickSwitch-Mac](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac) by hand,
+so `.github/workflows/release.yml` **builds only — it publishes nothing**. That
+also means it needs no tokens and no write permissions.
 
 ```bash
 git tag v1.0.1 && git push origin v1.0.1
 ```
 
-It produces **two** archives — `apple-silicon` (arm64) and `intel` (x86_64) —
-attaches them plus SHA-256 sums to a GitHub Release, and verifies each build
-with `lipo` so a mislabelled slice cannot ship. It also fails the build if
-`get-task-allow` is present, which is the debug entitlement that must never be
-released.
+The **tag is the version**. The workflow passes it as `MARKETING_VERSION`, so
+`v1.0.1` produces a bundle reporting `1.0.1` no matter what the Xcode project
+says, and `CURRENT_PROJECT_VERSION` becomes the workflow run number so every
+build is distinct. Use three components — `v1.0.0`, not `v1.0` — to match the
+tag, the release and `appcast.json` exactly.
+
+It produces **two disk images** — `apple-silicon` (arm64) and `intel` (x86_64) —
+plus `SHA256SUMS.txt`, as a single downloadable artifact on the workflow run.
+Each `.dmg` opens to the app beside an `/Applications` shortcut, so installing is
+a drag. The workflow mounts each image before finishing and fails if the app or
+the shortcut is missing.
+The run summary contains paste-ready release notes and the checksums, so
+creating the public release is: download the artifact, open
+[releases/new](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/new),
+drop the files in, paste the notes.
+
+Each build is verified with `lipo` so a mislabelled architecture cannot ship,
+and the workflow fails outright if `get-task-allow` is present — the debug
+entitlement that must never be released.
 
 Signing is optional so the workflow is useful immediately. Without secrets it
 produces ad-hoc signed builds that run locally but that Gatekeeper refuses
@@ -223,6 +241,96 @@ elsewhere. Add these repository secrets to get signed, notarized builds:
 | `APPLE_TEAM_ID` | Ten-character team identifier |
 | `APPLE_ID` | Apple ID for notarization |
 | `APPLE_APP_PASSWORD` | App-specific password for that Apple ID |
+
+This repository is private. Built releases are published to the public
+[MuhammadNasir-dev/QuickSwitch-Mac](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac),
+which is what users download from and what the download counts below read.
+
+## Counting users
+
+There are two different numbers, and they come from different places.
+
+### Downloads — available today, no setup
+
+GitHub records a download count per release asset. Nothing to host, nothing in
+the app:
+
+```bash
+./scripts/download-counts.sh
+```
+
+```
+v1.0.1         2026-07-28         412 downloads
+    QuickSwitch-1.0.1-apple-silicon.zip                 366
+    QuickSwitch-1.0.1-intel.zip                          46
+
+TOTAL                                412 downloads
+  apple-silicon                       366  (89%)
+  intel                                46  (11%)
+```
+
+The Apple Silicon / Intel split is genuinely useful — it tells you when the
+Intel build stops being worth producing.
+
+A download is **not** an install. The same person re-downloading, or taking both
+architectures, counts twice; someone who downloads and never opens it counts
+once. Read it as a floor on reach, not a user count.
+
+### Releasing: what goes where
+
+Two destinations, one file each way round:
+
+| File | Goes to | Why |
+| --- | --- | --- |
+| `QuickSwitch-<version>-apple-silicon.dmg`<br>`QuickSwitch-<version>-intel.dmg` | GitHub release on [QuickSwitch-Mac](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/new) | What users download. GitHub counts these for you. |
+| `appcast.json` | Root of **quickswitchmac.com** | What running copies check daily. Nothing else goes on the website. |
+
+The disk images are **not** uploaded to the website — `appcast.json` only points
+at the GitHub release, so there is one copy of each build and one download count.
+
+`appcast.json` is two lines:
+
+```json
+{
+  "version": "1.0.1",
+  "url": "https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/latest"
+}
+```
+
+**Bumping `version` is what triggers the update notice.** Publish the release and
+forget the website and nobody is told anything — the app compares its own version
+against this file and stays quiet when they match. The workflow run summary
+prints the exact JSON for the version just built, so it is a copy-and-paste.
+
+### Active users — needs a host with request logs
+
+The app checks `https://quickswitchmac.com/appcast.json` once a day, so one log
+line per running copy per day is a real daily-active count.
+
+**GitHub Pages will not give you this.** Pages serves the file happily but
+exposes no access logs, so the requests arrive and vanish. If you host the
+manifest there you get updates working and no numbers at all.
+
+Anything that reports request counts works. The least effort is putting the
+domain behind Cloudflare's free tier and reading the analytics for
+`/appcast.json`; a small VPS or any host with raw logs does the same:
+
+```bash
+awk '$7 ~ /appcast.json/ {print substr($4,2,11), $1}' access.log | sort -u | uniq -c
+```
+
+Because nothing identifying is sent, that counts distinct addresses per day, not
+installs — several Macs behind one router count once, one laptop on two networks
+counts twice. Accurate enough to watch a trend.
+
+### What is deliberately not sent
+
+No install identifier, no account, no persistent token, and **nothing derived
+from the user's windows** — no titles, no app names, no counts. An app holding
+Accessibility permission has to be able to state that plainly and have it be
+true, so the check is a plain `GET` carrying the app version and macOS version
+(`?v=1.0.1&os=15.7`) and nothing else. Settings → General says the same in the
+same words, with an off switch.
 
 ## Known macOS limitations
 

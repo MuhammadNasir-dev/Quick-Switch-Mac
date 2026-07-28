@@ -18,6 +18,7 @@ struct SettingsView: View {
     @ObservedObject var authorizer: AccessibilityAuthorizer
     @ObservedObject var launchAtLogin: LaunchAtLoginService
     @ObservedObject var favourites: FavouritesStore
+    @ObservedObject var updates: UpdateChecker
 
     /// Bounds rather than a fixed size: the window is resizable, and a pane
     /// whose content outgrows the height scrolls instead of pushing the window
@@ -78,7 +79,10 @@ struct SettingsView: View {
             minHeight: Metrics.minimumHeight,
             idealHeight: Metrics.idealHeight
         )
-        .onAppear { launchAtLogin.refresh() }
+        .onAppear {
+            launchAtLogin.refresh()
+            updates.checkIfDue(enabled: preferences.automaticUpdateChecks)
+        }
     }
 
     @ViewBuilder
@@ -120,6 +124,27 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
+            }
+
+            Section("Updates") {
+                Toggle("Check for updates automatically", isOn: $preferences.automaticUpdateChecks)
+
+                HStack {
+                    updateStatus
+                    Spacer()
+                    if case .updateAvailable = updates.state {
+                        Button("Download") { updates.openDownloadPage() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    } else {
+                        Button("Check Now") { updates.check() }
+                            .controlSize(.small)
+                    }
+                }
+
+                // Said plainly because the app holds Accessibility permission:
+                // anyone reasonable will want to know what leaves the machine.
+                caption("The check sends only the app version and your macOS version. No account, no identifier, and nothing about your windows.")
             }
 
             Section("Permissions") {
@@ -269,6 +294,34 @@ struct SettingsView: View {
             AboutContent()
                 .padding(.horizontal, 28)
                 .padding(.vertical, 32)
+        }
+    }
+
+    @ViewBuilder
+    private var updateStatus: some View {
+        switch updates.state {
+        case .idle:
+            Text("Not checked yet.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        case .checking:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Checking…").font(.callout).foregroundStyle(.secondary)
+            }
+        case .upToDate:
+            Label("QuickSwitch is up to date", systemImage: "checkmark.circle.fill")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        case .updateAvailable(let release):
+            Label("Version \(release.version.original) is available", systemImage: "arrow.down.circle.fill")
+                .font(.callout)
+                .foregroundStyle(.primary)
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
         }
     }
 

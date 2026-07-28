@@ -1082,3 +1082,96 @@ struct PointerActivityGateTests {
         #expect(!SwitcherCommand.modifierReleased.movesSelection)
     }
 }
+
+@Suite("Release versions")
+struct AppVersionTests {
+    @Test("Components are compared numerically, not as text")
+    func numericComparison() {
+        // The case that matters: lexicographically "1.10" sorts before "1.9",
+        // which would tell everyone on 1.9 that 1.10 is older and quietly stop
+        // offering updates forever.
+        #expect(AppVersion("1.10.0") > AppVersion("1.9.0"))
+        #expect(AppVersion("2.0.0") > AppVersion("1.99.99"))
+        #expect(AppVersion("1.0.1") > AppVersion("1.0.0"))
+    }
+
+    @Test("Missing components count as zero")
+    func paddingIsZero() {
+        // Otherwise 1.2 and 1.2.0 differ and the app prompts to "update" to the
+        // version it is already running, forever.
+        #expect(AppVersion("1.2") == AppVersion("1.2.0"))
+        #expect(AppVersion("1.2") == AppVersion("1.2.0.0"))
+        #expect(AppVersion("1.2.1") > AppVersion("1.2"))
+    }
+
+    @Test("Pre-release suffixes order against the release they precede")
+    func prereleaseSuffixes() {
+        #expect(AppVersion("1.2.0-beta.1") == AppVersion("1.2.0"))
+        #expect(AppVersion("1.3.0-beta") > AppVersion("1.2.0"))
+    }
+
+    @Test("Malformed input degrades instead of trapping")
+    func malformedInput() {
+        // A manifest is a file on a web server; it can contain anything.
+        #expect(AppVersion("") == AppVersion("0"))
+        #expect(AppVersion("v1.2.3") == AppVersion("1.2.3"))
+        #expect(AppVersion("nonsense") == AppVersion("0"))
+    }
+
+    @Test("Equality is symmetric and ordering is strict")
+    func orderingIsWellFormed() {
+        let a = AppVersion("1.4.2")
+        let b = AppVersion("1.4.2")
+        let c = AppVersion("1.5.0")
+        #expect(a == b)
+        #expect(!(a < b) && !(b < a))
+        #expect(a < c)
+        #expect(!(c < a))
+    }
+}
+
+@Suite("Update manifest")
+struct UpdateManifestTests {
+    @Test("A well-formed manifest parses")
+    func parsesManifest() throws {
+        let json = Data("""
+        {"version": "1.4.0", "url": "https://example.com/download", "notes": "Faster."}
+        """.utf8)
+        let release = try UpdateChecker.parse(json)
+        #expect(release.version == AppVersion("1.4.0"))
+        #expect(release.downloadURL.absoluteString == "https://example.com/download")
+        #expect(release.notes == "Faster.")
+    }
+
+    @Test("Unknown fields are ignored rather than fatal")
+    func toleratesUnknownFields() throws {
+        // The manifest is hosted separately from the app, so a field added
+        // years later must not stop an old build checking for updates.
+        let json = Data("""
+        {"version": "2.0.0", "url": "https://example.com/d", "minimumOS": "15.0", "sha256": "abc"}
+        """.utf8)
+        let release = try UpdateChecker.parse(json)
+        #expect(release.version == AppVersion("2.0.0"))
+        #expect(release.notes == nil)
+    }
+
+    @Test("Missing required fields are rejected")
+    func rejectsIncompleteManifest() {
+        for json in [
+            #"{"url": "https://example.com/d"}"#,
+            #"{"version": "1.0.0"}"#,
+            #"{}"#,
+            "not json at all"
+        ] {
+            #expect(throws: (any Error).self) {
+                try UpdateChecker.parse(Data(json.utf8))
+            }
+        }
+    }
+
+    @Test("The manifest URL is the documented static file")
+    func manifestLocation() {
+        #expect(UpdateChecker.manifestURL.host() == "quickswitchmac.com")
+        #expect(UpdateChecker.manifestURL.path == "/appcast.json")
+    }
+}

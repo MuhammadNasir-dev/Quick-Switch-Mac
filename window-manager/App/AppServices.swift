@@ -24,6 +24,7 @@ final class AppServices: ObservableObject {
     let switcher: SwitcherController
     let launchAtLogin: LaunchAtLoginService
     let favourites: FavouritesStore
+    let updates: UpdateChecker
 
     /// Set when the event tap has been abandoned; surfaced in the menu bar so
     /// a silently dead shortcut is never a mystery.
@@ -45,6 +46,7 @@ final class AppServices: ObservableObject {
         self.launchAtLogin = LaunchAtLoginService()
         let favourites = FavouritesStore()
         self.favourites = favourites
+        self.updates = UpdateChecker()
 
         self.switcher = SwitcherController(
             preferences: preferences,
@@ -79,6 +81,8 @@ final class AppServices: ObservableObject {
                 Log.input.error("Global shortcut disabled after repeated tap timeouts")
             }
         }
+
+        updates.checkIfDue(enabled: preferences.automaticUpdateChecks)
 
         authorizer.$status
             .removeDuplicates()

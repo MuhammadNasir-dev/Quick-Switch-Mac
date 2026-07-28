@@ -43,7 +43,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             services.authorizer.$status.map { _ in }.eraseToAnyPublisher(),
             services.authorizer.$isSecureInputActive.map { _ in }.eraseToAnyPublisher(),
             services.$inputFailure.map { _ in }.eraseToAnyPublisher(),
-            services.preferences.$layout.map { _ in }.eraseToAnyPublisher()
+            services.preferences.$layout.map { _ in }.eraseToAnyPublisher(),
+            services.updates.$state.map { _ in }.eraseToAnyPublisher()
         )
         // `@Published` publishes from `willSet`, so at delivery time the
         // properties still hold their *previous* values. `refresh()` reads the
@@ -273,6 +274,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         help.target = self
         menu.addItem(help)
 
+        if case .updateAvailable(let release) = services.updates.state {
+            let update = NSMenuItem(
+                title: "Update to \(release.version.original)…",
+                action: #selector(downloadUpdate),
+                keyEquivalent: ""
+            )
+            update.image = Self.symbol("arrow.down.circle", tint: .controlAccentColor)
+            update.target = self
+            menu.addItem(update)
+        }
+
         let about = NSMenuItem(title: "About \(AppInfo.name)", action: #selector(openAbout), keyEquivalent: "")
         about.image = Self.symbol("info.circle")
         about.target = self
@@ -359,6 +371,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func openSettings() {
         onOpenSettings()
+    }
+
+    @objc private func downloadUpdate() {
+        services.updates.openDownloadPage()
     }
 
     @objc private func openAbout() {

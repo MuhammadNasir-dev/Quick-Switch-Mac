@@ -18,6 +18,7 @@ final class Preferences: ObservableObject {
         static let layout = "switcher.layout"
         static let activeAppFirst = "switcher.activeAppFirst"
         static let favouritesFirst = "switcher.favouritesFirst"
+        static let automaticUpdateChecks = "updates.automatic"
     }
 
     private let defaults: UserDefaults
@@ -75,6 +76,14 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(favouritesFirst, forKey: Key.favouritesFirst) }
     }
 
+    /// Check quickswitchmac.com for a newer release once a day.
+    ///
+    /// Also the app's only measure of how many people use it: each check is one
+    /// line in the web server's access log. Off means neither happens.
+    @Published var automaticUpdateChecks: Bool {
+        didSet { defaults.set(automaticUpdateChecks, forKey: Key.automaticUpdateChecks) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: [
@@ -86,7 +95,8 @@ final class Preferences: ObservableObject {
             Key.maximumVisibleRows: 9,
             Key.layout: SwitcherLayout.list.rawValue,
             Key.activeAppFirst: true,
-            Key.favouritesFirst: true
+            Key.favouritesFirst: true,
+            Key.automaticUpdateChecks: true
         ])
 
         let rawModifier = defaults.string(forKey: Key.modifier) ?? SwitcherModifier.option.rawValue
@@ -99,5 +109,6 @@ final class Preferences: ObservableObject {
         layout = SwitcherLayout(rawValue: defaults.string(forKey: Key.layout) ?? "") ?? .list
         showActiveAppWindowsFirst = defaults.bool(forKey: Key.activeAppFirst)
         favouritesFirst = defaults.bool(forKey: Key.favouritesFirst)
+        automaticUpdateChecks = defaults.bool(forKey: Key.automaticUpdateChecks)
     }
 }

@@ -21,8 +21,10 @@ on:
         type: boolean
         default: true
 
+# Nothing is published from here: the workflow only builds. Read access is all
+# it needs.
 permissions:
-  contents: write
+  contents: read
 
 env:
   PROJECT: window-manager.xcodeproj
@@ -182,6 +184,40 @@ jobs:
 
           codesign --verify --strict --verbose=2 "$APP"
 
+      - name: Build the disk image
+        id: package
+        run: |
+          set -euo pipefail
+          NAME="$APP_NAME-${{ steps.version.outputs.version }}-${{ matrix.label }}"
+          OUT="$RUNNER_TEMP/dist"
+          mkdir -p "$OUT"
+
+          # Stage the app beside a symlink to /Applications, which is what makes
+          # the window a drag-and-drop install rather than a folder the user has
+          # to work out what to do with.
+          STAGE="$RUNNER_TEMP/dmg-stage"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          # `ditto` rather than `cp -R`: it preserves symlinks, resource forks
+          # and the code signature. `cp` can silently produce a bundle that will
+          # not launch.
+          ditto "$APP" "$STAGE/$APP_NAME.app"
+          ln -s /Applications "$STAGE/Applications"
+
+          # UDZO is the compressed read-only format every Mac can open with no
+          # third-party tooling.
+          hdiutil create \
+            -volname "$APP_NAME ${{ steps.version.outputs.version }}" \
+            -srcfolder "$STAGE" \
+            -fs HFS+ \
+            -format UDZO \
+            -ov \
+            "$OUT/$NAME.dmg"
+
+          echo "dmg=$OUT/$NAME.dmg" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME.dmg" >> "$GITHUB_OUTPUT"
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
       - name: Notarize
         if: steps.signing.outputs.signed == 'true'
         env:
@@ -194,38 +230,39 @@ jobs:
             exit 0
           fi
 
-          # notarytool takes an archive, not a bundle.
-          SUBMISSION="$RUNNER_TEMP/notarize.zip"
-          ditto -c -k --keepParent "$APP" "$SUBMISSION"
-
-          xcrun notarytool submit "$SUBMISSION" \
+          # The disk image is submitted and stapled directly. Stapling the app
+          # inside a DMG that was built earlier would leave the ticket on a copy
+          # nobody ever mounts.
+          xcrun notarytool submit "${{ steps.package.outputs.dmg }}" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$TEAM_ID" \
             --wait
 
-          # Stapling attaches the ticket so the app validates offline.
-          xcrun stapler staple "$APP"
-          xcrun stapler validate "$APP"
-          echo "NOTARIZED=true" >> "$GITHUB_ENV"
+          xcrun stapler staple "${{ steps.package.outputs.dmg }}"
+          xcrun stapler validate "${{ steps.package.outputs.dmg }}"
 
-      - name: Package
-        id: package
+      - name: Checksum
         run: |
-          NAME="$APP_NAME-${{ steps.version.outputs.version }}-${{ matrix.label }}.zip"
-          OUT="$RUNNER_TEMP/dist"
-          mkdir -p "$OUT"
+          # After notarization: stapling rewrites the disk image, so a checksum
+          # taken before it would not match what users download.
+          cd "${{ steps.package.outputs.dir }}"
+          shasum -a 256 "${{ steps.package.outputs.name }}" > "${{ steps.package.outputs.name }}.sha256"
+          cat "${{ steps.package.outputs.name }}.sha256"
 
-          # `ditto` preserves symlinks, resource forks and the code signature.
-          # `zip` does not, and silently produces a bundle that fails to launch.
-          ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/$NAME"
-          ( cd "$OUT" && shasum -a 256 "$NAME" > "$NAME.sha256" )
-
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
-
-      - name: Report Gatekeeper status
+      - name: Verify the disk image opens
         run: |
+          set -euo pipefail
+          # Mount what users will actually double-click. A DMG that cannot be
+          # attached, or that is missing the app, is worth catching here rather
+          # than in a bug report.
+          MOUNT="$(hdiutil attach "${{ steps.package.outputs.dmg }}" -nobrowse -readonly | tail -1 | awk '{ $1=""; $2=""; sub(/^  /, ""); print }')"
+          echo "Mounted at: $MOUNT"
+          test -d "$MOUNT/$APP_NAME.app" || { echo "::error::No app inside the disk image"; exit 1; }
+          test -L "$MOUNT/Applications" || { echo "::error::No /Applications shortcut to drag onto"; exit 1; }
+          codesign --verify --strict "$MOUNT/$APP_NAME.app"
+          hdiutil detach "$MOUNT" -quiet
+
           # Informational: `spctl` rejects anything not notarized, which is
           # expected until the signing secrets are configured.
           spctl --assess --type exec --verbose=4 "$APP" || true
@@ -237,13 +274,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  release:
-    name: Publish
+  package:
+    name: Package
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -259,47 +294,74 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Compose release notes
-        id: notes
+      - name: Combine into one downloadable bundle
         run: |
+          # A single artifact is one click to download, rather than one per
+          # architecture, since these are uploaded to the public repository by
+          # hand.
+          ls -la dist
+          cat dist/*.sha256 > dist/SHA256SUMS.txt
+          rm -f dist/*.dmg.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QuickSwitch-${{ steps.version.outputs.version }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Write release notes to the job summary
+        run: |
+          # Paste-ready: the source repository is private and releases are
+          # published manually to the public one, so the workflow prepares the
+          # text rather than creating anything.
           {
             echo "## QuickSwitch ${{ steps.version.outputs.version }}"
             echo
+            echo "Download the artifact above, then create the release at"
+            echo "<https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/new>"
+            echo "with the tag \`v${{ steps.version.outputs.version }}\` and the notes below."
+            echo
+            echo "---"
+            echo
+            echo "### Release notes"
+            echo
+            echo '```markdown'
             echo "Download the build that matches your Mac:"
             echo
             echo "| Mac | Download |"
             echo "| --- | --- |"
-            echo "| Apple Silicon (M1 and later) | \`QuickSwitch-${{ steps.version.outputs.version }}-apple-silicon.zip\` |"
-            echo "| Intel | \`QuickSwitch-${{ steps.version.outputs.version }}-intel.zip\` |"
+            echo "| Apple Silicon (M1 and later) | \`QuickSwitch-${{ steps.version.outputs.version }}-apple-silicon.dmg\` |"
+            echo "| Intel | \`QuickSwitch-${{ steps.version.outputs.version }}-intel.dmg\` |"
             echo
-            echo "Not sure? Apple menu → About This Mac. \"Chip\" means Apple Silicon; \"Processor\" means Intel."
+            echo "Not sure? Apple menu -> About This Mac. \"Chip\" means Apple Silicon; \"Processor\" means Intel."
             echo
             echo "### Installing"
             echo
-            echo "1. Unzip and move **QuickSwitch.app** to \`/Applications\`."
-            echo "2. Launch it — there is no Dock icon, look for the menu bar."
-            echo "3. Grant Accessibility access when prompted."
+            echo "1. Open the .dmg and drag **QuickSwitch** onto the **Applications** shortcut."
+            echo "2. The first launch is blocked because the app is not notarized:"
+            echo "   open **System Settings -> Privacy & Security**, scroll down and click **Open Anyway**."
+            echo "3. Launch it - there is no Dock icon, look for the menu bar."
+            echo "4. Grant Accessibility access when prompted."
+            echo '```'
             echo
-            if [ -z "${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}" ]; then
-              echo "> [!WARNING]"
-              echo "> This build is **not signed with a Developer ID or notarized**, so"
-              echo "> macOS will refuse to open it normally. Right-click the app and choose"
-              echo "> Open, then confirm. Signed builds require a Developer ID certificate"
-              echo "> to be configured in the repository secrets."
-              echo
-            fi
-            echo "\`\`\`"
-            cat dist/*.sha256
-            echo "\`\`\`"
-          } > notes.md
-          cat notes.md
-
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "v${{ steps.version.outputs.version }}" \
-            dist/*.zip dist/*.sha256 \
-            --title "QuickSwitch ${{ steps.version.outputs.version }}" \
-            --notes-file notes.md \
-            ${{ (github.event_name == 'workflow_dispatch' && inputs.draft) && '--draft' || '' }}
+            echo "### Checksums"
+            echo
+            echo '```'
+            cat dist/SHA256SUMS.txt
+            echo '```'
+            echo
+            echo "---"
+            echo
+            echo "### Then update the website"
+            echo
+            echo "Replace \`appcast.json\` at the root of quickswitchmac.com with this."
+            echo "Until you do, nobody running an older build is told an update exists."
+            echo
+            echo '```json'
+            echo '{'
+            echo '  "version": "${{ steps.version.outputs.version }}",'
+            echo '  "url": "https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/latest"'
+            echo '}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -30,7 +30,7 @@ import os
 @MainActor
 final class HotKeyMonitor {
     /// Why the tap gave up.
-    enum Failure: Equatable {
+    nonisolated enum Failure: Equatable {
         /// Accessibility trust was revoked while the tap was installed.
         case trustRevoked
         /// macOS disabled the tap for slowness repeatedly; re-arming it would
