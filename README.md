@@ -1,9 +1,13 @@
 # QuickSwitch
 
-[quickswitchmac.com](https://quickswitchmac.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-macOS%2015.7%2B-lightgrey.svg)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-6.1%2B-orange.svg)](https://swift.org)
+[![CI](https://github.com/MuhammadNasir-dev/window-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/MuhammadNasir-dev/window-manager/actions/workflows/ci.yml)
 
-A macOS window switcher that lists **every open window individually**, not just
-applications.
+[quickswitchmac.com](https://quickswitchmac.com) · [Download Latest Release](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/latest)
+
+A native, open-source macOS window switcher that lists **every open window individually**, not just applications. Built with Swift, SwiftUI, and AppKit with zero telemetry.
 
 ```
 🌐 Safari      ChatGPT — OpenAI
@@ -18,8 +22,15 @@ applications.
 ## Setup
 
 1. Open the `.dmg` and drag **QuickSwitch** onto the **Applications** shortcut,
-   then launch it. There is no Dock icon; look for the window icon in the menu
-   bar.
+   then launch it. macOS blocks the first launch because the app is not
+   notarized — open **System Settings → Privacy & Security** and click
+   **Open Anyway**, or clear the flag directly:
+
+   ```bash
+   xattr -d com.apple.quarantine /Applications/QuickSwitch.app
+   ```
+
+   There is no Dock icon; look for the window icon in the menu bar.
 2. Grant **Accessibility** access when prompted (System Settings → Privacy &
    Security → Accessibility). The setup window detects the change automatically
    — no relaunch.
@@ -32,6 +43,32 @@ applications.
 
 > Accessibility trust is tied to the code signature, so **every rebuild revokes
 > it**. Remove the stale entry in System Settings and re-add the new build.
+
+## Building from Source
+
+### Prerequisites
+
+- macOS 15.7 or later
+- Xcode 16.0 or later (with Swift 6.1+ toolchain)
+
+### Steps
+
+```bash
+# Clone the repository
+git clone https://github.com/MuhammadNasir-dev/window-manager.git
+cd window-manager
+
+# Open in Xcode
+open window-manager.xcodeproj
+```
+
+Select the **QuickSwitch** scheme and press <kbd>⌘</kbd><kbd>R</kbd> to build and run.
+
+Alternatively, build from the command line:
+
+```bash
+xcodebuild -project window-manager.xcodeproj -scheme QuickSwitch -destination 'platform=macOS' build
+```
 
 ## Shortcuts
 
@@ -201,10 +238,7 @@ want the repository to match the product.
 
 ## Releases
 
-This repository is private and releases are uploaded to the public
-[QuickSwitch-Mac](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac) by hand,
-so `.github/workflows/release.yml` **builds only — it publishes nothing**. That
-also means it needs no tokens and no write permissions.
+Releases are built via `.github/workflows/release.yml`. The workflow **builds only — it publishes nothing**, ensuring it needs no sensitive tokens or elevated write permissions.
 
 ```bash
 git tag v1.0.1 && git push origin v1.0.1
@@ -242,8 +276,9 @@ elsewhere. Add these repository secrets to get signed, notarized builds:
 | `APPLE_ID` | Apple ID for notarization |
 | `APPLE_APP_PASSWORD` | App-specific password for that Apple ID |
 
-This repository is private. Built releases are published to the public
-[MuhammadNasir-dev/QuickSwitch-Mac](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac),
+Built releases are published to GitHub Releases on
+[MuhammadNasir-dev/window-manager](https://github.com/MuhammadNasir-dev/window-manager/releases)
+and [MuhammadNasir-dev/QuickSwitch-Mac](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac),
 which is what users download from and what the download counts below read.
 
 ## Counting users
@@ -357,3 +392,14 @@ same words, with an off switch.
   Space triggers the system's ~0.5 s Space transition, which cannot be skipped.
 * **Sandboxing is off** — required, since a sandboxed process can neither
   inspect other apps via Accessibility nor create an event tap.
+
+## Contributing
+
+Contributions, bug reports, and feature requests are welcome! Please check out [CONTRIBUTING.md](CONTRIBUTING.md) for local development instructions, architecture notes, and guidelines.
+
+Please ensure you adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## License
+
+QuickSwitch is open-source software licensed under the [MIT License](LICENSE).
+

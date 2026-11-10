@@ -343,6 +343,11 @@ jobs:
             echo "   open **System Settings -> Privacy & Security**, scroll down and click **Open Anyway**."
             echo "3. Launch it - there is no Dock icon, look for the menu bar."
             echo "4. Grant Accessibility access when prompted."
+            echo
+            echo "If no Open Anyway button appears, or macOS says the app is damaged,"
+            echo "clear the quarantine flag instead - same effect as the button:"
+            echo
+            echo "    xattr -d com.apple.quarantine /Applications/QuickSwitch.app"
             echo '```'
             echo
             echo "### Checksums"
