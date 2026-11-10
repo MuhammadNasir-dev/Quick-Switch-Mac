@@ -23,8 +23,8 @@ This project is governed by the [Contributor Covenant Code of Conduct](CODE_OF_C
 1. **Fork the repository** on GitHub.
 2. **Clone your fork**:
    ```bash
-   git clone https://github.com/<your-username>/window-manager.git
-   cd window-manager
+   git clone https://github.com/<your-username>/Quick-Switch-Mac.git
+   cd Quick-Switch-Mac
    ```
 3. **Open the project in Xcode**:
    ```bash

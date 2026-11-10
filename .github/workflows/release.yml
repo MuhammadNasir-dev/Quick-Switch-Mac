@@ -319,7 +319,7 @@ jobs:
             echo "## QuickSwitch ${{ steps.version.outputs.version }}"
             echo
             echo "Download the artifact above, then create the release at"
-            echo "<https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/new>"
+            echo "<https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/releases/new>"
             echo "with the tag \`v${{ steps.version.outputs.version }}\` and the notes below."
             echo
             echo "---"
@@ -366,7 +366,7 @@ jobs:
             echo '```json'
             echo '{'
             echo '  "version": "${{ steps.version.outputs.version }}",'
-            echo '  "url": "https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/latest"'
+            echo '  "url": "https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/releases/latest"'
             echo '}'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

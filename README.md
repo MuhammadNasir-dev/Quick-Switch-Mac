@@ -3,9 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%2015.7%2B-lightgrey.svg)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.1%2B-orange.svg)](https://swift.org)
-[![CI](https://github.com/MuhammadNasir-dev/window-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/MuhammadNasir-dev/window-manager/actions/workflows/ci.yml)
+[![CI](https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/actions/workflows/ci.yml/badge.svg)](https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/actions/workflows/ci.yml)
 
-[quickswitchmac.com](https://quickswitchmac.com) · [Download Latest Release](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/latest)
+[quickswitchmac.vercel.app](https://quickswitchmac.vercel.app/) · [Download Latest Release](https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/releases/latest)
 
 A native, open-source macOS window switcher that lists **every open window individually**, not just applications. Built with Swift, SwiftUI, and AppKit with zero telemetry.
 
@@ -55,8 +55,8 @@ A native, open-source macOS window switcher that lists **every open window indiv
 
 ```bash
 # Clone the repository
-git clone https://github.com/MuhammadNasir-dev/window-manager.git
-cd window-manager
+git clone https://github.com/MuhammadNasir-dev/Quick-Switch-Mac.git
+cd Quick-Switch-Mac
 
 # Open in Xcode
 open window-manager.xcodeproj
@@ -257,7 +257,7 @@ a drag. The workflow mounts each image before finishing and fails if the app or
 the shortcut is missing.
 The run summary contains paste-ready release notes and the checksums, so
 creating the public release is: download the artifact, open
-[releases/new](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/new),
+[releases/new](https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/releases/new),
 drop the files in, paste the notes.
 
 Each build is verified with `lipo` so a mislabelled architecture cannot ship,
@@ -277,8 +277,7 @@ elsewhere. Add these repository secrets to get signed, notarized builds:
 | `APPLE_APP_PASSWORD` | App-specific password for that Apple ID |
 
 Built releases are published to GitHub Releases on
-[MuhammadNasir-dev/window-manager](https://github.com/MuhammadNasir-dev/window-manager/releases)
-and [MuhammadNasir-dev/QuickSwitch-Mac](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac),
+[MuhammadNasir-dev/Quick-Switch-Mac](https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/releases),
 which is what users download from and what the download counts below read.
 
 ## Counting users
@@ -317,8 +316,8 @@ Two destinations, one file each way round:
 
 | File | Goes to | Why |
 | --- | --- | --- |
-| `QuickSwitch-<version>-apple-silicon.dmg`<br>`QuickSwitch-<version>-intel.dmg` | GitHub release on [QuickSwitch-Mac](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/new) | What users download. GitHub counts these for you. |
-| `appcast.json` | Root of **quickswitchmac.com** | What running copies check daily. Nothing else goes on the website. |
+| `QuickSwitch-<version>-apple-silicon.dmg`<br>`QuickSwitch-<version>-intel.dmg` | GitHub release on [Quick-Switch-Mac](https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/releases/new) | What users download. GitHub counts these for you. |
+| `appcast.json` | Root of **quickswitchmac.vercel.app** | What running copies check daily. Nothing else goes on the website. |
 
 The disk images are **not** uploaded to the website — `appcast.json` only points
 at the GitHub release, so there is one copy of each build and one download count.
@@ -328,7 +327,7 @@ at the GitHub release, so there is one copy of each build and one download count
 ```json
 {
   "version": "1.0.1",
-  "url": "https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/latest"
+  "url": "https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/releases/latest"
 }
 ```
 

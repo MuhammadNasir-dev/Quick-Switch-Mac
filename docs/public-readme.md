@@ -16,7 +16,7 @@ all ten, each with its own title, so you go straight to the one you meant.
 📁 Finder      Downloads
 ```
 
-[**Download the latest release →**](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/latest)
+[**Download the latest release →**](https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/releases/latest)
 
 | Your Mac | File |
 | --- | --- |
@@ -123,9 +123,9 @@ These are macOS constraints rather than missing work:
 ## Support
 
 Found a bug or want something added?
-[Open an issue](https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/issues).
+[Open an issue](https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/issues).
 
 ---
 
-[quickswitchmac.com](https://quickswitchmac.com) · Copyright © 2026
+[quickswitchmac.vercel.app](https://quickswitchmac.vercel.app/) · Copyright © 2026
 QuickSwitchMac. All rights reserved.

@@ -11,7 +11,7 @@
 # unauthenticated rate limit of 60 requests an hour.
 set -euo pipefail
 
-REPO="${1:-MuhammadNasir-dev/QuickSwitch-Mac}"
+REPO="${1:-MuhammadNasir-dev/Quick-Switch-Mac}"
 API="https://api.github.com/repos/$REPO/releases?per_page=100"
 
 # macOS ships bash 3.2, where `"${arr[@]}"` on an empty array trips `set -u`.

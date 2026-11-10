@@ -158,7 +158,7 @@ does not distinguish a download link from any other external link. Tag the
 download explicitly on your site:
 
 ```html
-<a href="https://github.com/MuhammadNasir-dev/QuickSwitch-Mac/releases/latest"
+<a href="https://github.com/MuhammadNasir-dev/Quick-Switch-Mac/releases/latest"
    onclick="gtag('event', 'download_click', { arch: 'apple_silicon' });">
   Download for Apple Silicon
 </a>
